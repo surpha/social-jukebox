@@ -94,8 +94,21 @@ class NowPlayingResponse(BaseModel):
     is_playing: bool = False
 
 
+class UpNextResponse(BaseModel):
+    track_id: str
+    name: str
+    artist: str
+    album_art: str
+    duration_ms: int
+    vote_count: int
+
+    class Config:
+        from_attributes = True
+
+
 class QueueResponse(BaseModel):
     now_playing: NowPlayingResponse | None = None
+    up_next: UpNextResponse | None = None
     queue: list[QueueItemResponse] = []
     space_name: str = ""
 

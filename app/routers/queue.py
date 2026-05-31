@@ -201,6 +201,26 @@ async def get_queue(
     except Exception:
         pass  # If Spotify fails, just show queue without now playing
 
+    # Get the "up next" track (already queued to Spotify, locked in)
+    up_next = None
+    up_next_result = await db.execute(
+        select(QueueItem)
+        .where(QueueItem.space_id == space.id, QueueItem.status == "queued")
+        .order_by(QueueItem.created_at.desc())
+        .limit(1)
+    )
+    up_next_item = up_next_result.scalar_one_or_none()
+    if up_next_item:
+        from app.schemas import UpNextResponse
+        up_next = UpNextResponse(
+            track_id=up_next_item.track_id,
+            name=up_next_item.name,
+            artist=up_next_item.artist,
+            album_art=up_next_item.album_art,
+            duration_ms=up_next_item.duration_ms,
+            vote_count=up_next_item.vote_count,
+        )
+
     # Get sorted pending queue items
     result = await db.execute(
         select(QueueItem)
@@ -232,4 +252,4 @@ async def get_queue(
         for item in items
     ]
 
-    return QueueResponse(now_playing=now_playing, queue=queue_items, space_name=space.name)
+    return QueueResponse(now_playing=now_playing, up_next=up_next, queue=queue_items, space_name=space.name)

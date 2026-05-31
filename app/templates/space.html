@@ -119,6 +119,30 @@
             </div>
         </section>
 
+        <!-- Up Next (locked in) -->
+        <section id="upNextSection" class="hidden">
+            <div class="flex items-center gap-2 mb-3">
+                <svg class="w-4 h-4 text-sp-green" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+                </svg>
+                <h2 class="text-base font-bold">Up Next</h2>
+                <span class="text-[10px] text-sp-light bg-sp-green/10 text-sp-green px-2 py-0.5 rounded-full font-semibold uppercase">Locked</span>
+            </div>
+            <div id="upNextCard" class="flex items-center gap-3 p-3 rounded-xl bg-sp-green/5 border border-sp-green/20">
+                <img id="unArt" src="" alt="" class="w-12 h-12 rounded object-cover flex-shrink-0 shadow">
+                <div class="flex-1 min-w-0">
+                    <p id="unTitle" class="text-sm font-semibold truncate"></p>
+                    <p id="unArtist" class="text-xs text-sp-light truncate mt-0.5"></p>
+                </div>
+                <div class="flex items-center gap-1 text-sp-green text-xs font-semibold flex-shrink-0">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 15l7-7 7 7"/>
+                    </svg>
+                    <span id="unVotes"></span>
+                </div>
+            </div>
+        </section>
+
         <!-- Search -->
         <section>
             <div class="relative">
@@ -300,6 +324,18 @@
                 document.getElementById('npProgress').style.width = `${progress}%`;
                 document.getElementById('npElapsed').textContent = formatTime(np.progress_ms);
                 document.getElementById('npDuration').textContent = formatTime(np.duration_ms);
+            }
+
+            // Update Up Next
+            const upNextSection = document.getElementById('upNextSection');
+            if (data.up_next) {
+                upNextSection.classList.remove('hidden');
+                document.getElementById('unArt').src = data.up_next.album_art;
+                document.getElementById('unTitle').textContent = data.up_next.name;
+                document.getElementById('unArtist').textContent = data.up_next.artist;
+                document.getElementById('unVotes').textContent = data.up_next.vote_count;
+            } else {
+                upNextSection.classList.add('hidden');
             }
 
             // Update Queue
