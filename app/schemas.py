@@ -106,17 +106,17 @@ class UpNextResponse(BaseModel):
         from_attributes = True
 
 
-class QueueResponse(BaseModel):
-    now_playing: NowPlayingResponse | None = None
-    up_next: UpNextResponse | None = None
-    queue: list[QueueItemResponse] = []
-    spotify_queue: list[SearchResult] = []
-    space_name: str = ""
-
-
 class SearchResult(BaseModel):
     track_id: str
     name: str
     artist: str
     album_art: str
     duration_ms: int
+
+
+class QueueResponse(BaseModel):
+    now_playing: NowPlayingResponse | None = None
+    up_next: UpNextResponse | None = None
+    queue: list[QueueItemResponse] = []
+    spotify_queue: list[SearchResult] = []
+    space_name: str = ""
