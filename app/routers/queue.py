@@ -327,7 +327,9 @@ async def get_queue(
                 progress_ms=playback.get("progress_ms", 0),
                 is_playing=playback.get("is_playing", False),
             )
-    except Exception:
+    except Exception as e:
+        import logging
+        logging.warning(f"Spotify playback fetch failed for space {code}: {type(e).__name__}")
         pass  # If Spotify fails, just show queue without now playing
 
     # Get the "up next" track (already queued to Spotify, locked in)
