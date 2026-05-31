@@ -101,3 +101,9 @@ async def get_me(current_user: User = Depends(get_current_user)):
         has_spotify=current_user.spotify_refresh_token is not None,
         created_at=current_user.created_at,
     )
+
+
+@router.get("/google-client-id")
+async def get_google_client_id():
+    """Return Google Client ID for frontend initialization."""
+    return {"client_id": settings.google_client_id}
