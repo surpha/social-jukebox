@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard — Social Jukebox</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'sp-green': '#1DB954',
+                        'sp-green-hover': '#1ed760',
+                        'sp-black': '#121212',
+                        'sp-dark': '#181818',
+                        'sp-card': '#282828',
+                        'sp-light': '#b3b3b3',
+                        'sp-white': '#ffffff',
+                    },
+                    fontFamily: { 'sans': ['Inter', 'system-ui', 'sans-serif'] }
+                }
+            }
+        }
+    </script>
+    <style>
+        body { background-color: #121212; }
+        .toggle-active { background-color: #1DB954; }
+        .toggle-inactive { background-color: #535353; }
+        .fade-in { animation: fadeIn 0.3s ease-in; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes pulse-green { 0%, 100% { box-shadow: 0 0 0 0 rgba(29, 185, 84, 0.4); } 70% { box-shadow: 0 0 0 8px rgba(29, 185, 84, 0); } }
+        .pulse-dot { animation: pulse-green 2s infinite; }
+    </style>
+</head>
+<body class="font-sans text-sp-white min-h-screen">
+    <!-- Nav -->
+    <nav class="fixed top-0 w-full z-50 bg-sp-black/95 backdrop-blur-md border-b border-white/5">
+        <div class="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
+            <div class="flex items-center gap-2">
+                <svg class="w-7 h-7 text-sp-green" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 14.36c-.2.2-.51.2-.71 0-1.97-1.2-4.46-1.47-7.39-.8-.28.06-.57-.12-.63-.4-.06-.28.12-.57.4-.63 3.21-.73 5.97-.42 8.17.93.2.12.27.39.16.6zm1.23-2.71c-.25.25-.62.25-.87 0-2.26-1.39-5.7-1.79-8.37-.98-.35.1-.72-.09-.82-.44-.1-.35.09-.72.44-.82 3.05-.93 6.84-.48 9.41 1.12.25.15.33.49.18.75z"/>
+                </svg>
+                <span class="text-lg font-bold">Social Jukebox</span>
+            </div>
+            <div class="flex items-center gap-4">
+                <span id="userName" class="text-sp-light text-sm hidden md:block"></span>
+                <button onclick="logout()" class="text-sm text-sp-light hover:text-white transition-colors">Log out</button>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <main class="pt-24 pb-16 max-w-6xl mx-auto px-6">
+        <!-- Spotify Connection Banner -->
+        <div id="spotifyBanner" class="hidden mb-8 bg-gradient-to-r from-sp-card to-sp-dark rounded-2xl p-6 border border-white/5 fade-in">
+            <div class="flex flex-col md:flex-row items-center justify-between gap-4">
+                <div class="flex items-center gap-4">
+                    <div class="w-12 h-12 bg-sp-green/10 rounded-full flex items-center justify-center">
+                        <svg class="w-6 h-6 text-sp-green" fill="currentColor" viewBox="0 0 24 24">
+                            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 14.36c-.2.2-.51.2-.71 0-1.97-1.2-4.46-1.47-7.39-.8-.28.06-.57-.12-.63-.4-.06-.28.12-.57.4-.63 3.21-.73 5.97-.42 8.17.93.2.12.27.39.16.6z"/>
+                        </svg>
+                    </div>
+                    <div>
+                        <h3 id="spotifyStatusText" class="font-semibold">Connect Spotify</h3>
+                        <p id="spotifySubText" class="text-sp-light text-sm">Link your Spotify Premium to control playback</p>
+                    </div>
+                </div>
+                <button id="spotifyBtn" onclick="linkSpotify()" class="px-6 py-2.5 bg-sp-green text-sp-black font-bold rounded-full hover:bg-sp-green-hover transition-colors text-sm">
+                    Connect Spotify
+                </button>
+            </div>
+        </div>
+
+        <!-- Create Space -->
+        <div class="mb-8">
+            <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6">
+                <h1 class="text-3xl font-bold">Your Spaces</h1>
+                <button onclick="showCreateModal()" id="createBtn" class="px-5 py-2.5 bg-sp-green text-sp-black font-bold rounded-full hover:bg-sp-green-hover transition-all hover:scale-105 text-sm flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                    </svg>
+                    New Space
+                </button>
+            </div>
+        </div>
+
+        <!-- Spaces Grid -->
+        <div id="spacesGrid" class="grid md:grid-cols-2 lg:grid-cols-3 gap-5">
+            <!-- Populated by JS -->
+        </div>
+
+        <!-- Empty State -->
+        <div id="emptyState" class="hidden text-center py-20">
+            <div class="w-20 h-20 bg-sp-card rounded-full flex items-center justify-center mx-auto mb-5">
+                <svg class="w-10 h-10 text-sp-light" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2z"/>
+                </svg>
+            </div>
+            <h3 class="text-xl font-semibold mb-2">No spaces yet</h3>
+            <p class="text-sp-light mb-6">Create your first Music Space to get started</p>
+        </div>
+    </main>
+
+    <!-- Create Space Modal -->
+    <div id="createModal" class="fixed inset-0 z-[100] hidden items-center justify-center bg-black/70 backdrop-blur-sm">
+        <div class="bg-sp-dark rounded-2xl p-8 w-full max-w-md mx-4 border border-white/10 shadow-2xl fade-in">
+            <h2 class="text-2xl font-bold mb-6">Create a Music Space</h2>
+            <form onsubmit="createSpace(event)">
+                <label class="text-sm text-sp-light block mb-2">Space Name</label>
+                <input type="text" id="spaceName" placeholder="e.g. Downtown Gym, Coffee Corner" required
+                    class="w-full px-4 py-3 bg-sp-card border border-white/10 rounded-lg text-white placeholder-sp-light mb-6">
+                <div class="flex gap-3">
+                    <button type="button" onclick="closeCreateModal()" class="flex-1 py-3 border border-white/10 rounded-full font-semibold hover:bg-sp-card transition-colors">Cancel</button>
+                    <button type="submit" class="flex-1 py-3 bg-sp-green text-sp-black font-bold rounded-full hover:bg-sp-green-hover transition-colors">Create</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- QR Modal -->
+    <div id="qrModal" class="fixed inset-0 z-[100] hidden items-center justify-center bg-black/70 backdrop-blur-sm">
+        <div class="bg-sp-dark rounded-2xl p-8 w-full max-w-sm mx-4 border border-white/10 shadow-2xl text-center fade-in">
+            <h2 class="text-xl font-bold mb-2">Share this QR Code</h2>
+            <p class="text-sp-light text-sm mb-6">Guests scan to join your space</p>
+            <div class="bg-white rounded-xl p-4 inline-block mb-4">
+                <img id="qrImage" src="" alt="QR Code" class="w-48 h-48">
+            </div>
+            <p id="qrUrl" class="text-sp-green text-sm font-mono mb-6"></p>
+            <div class="flex gap-3">
+                <button onclick="closeQrModal()" class="flex-1 py-3 border border-white/10 rounded-full font-semibold hover:bg-sp-card transition-colors">Close</button>
+                <a id="qrDownload" href="" download="qr-code.png" class="flex-1 py-3 bg-sp-green text-sp-black font-bold rounded-full hover:bg-sp-green-hover transition-colors inline-flex items-center justify-center">Download</a>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    const API = '';
+    const token = localStorage.getItem('token');
+
+    if (!token) window.location.href = '/';
+
+    const headers = { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' };
+
+    // Load user & spaces on page load
+    async function init() {
+        try {
+            const [userRes, spotifyRes] = await Promise.all([
+                fetch(API + '/api/auth/me', { headers }),
+                fetch(API + '/api/spotify/status', { headers }),
+            ]);
+
+            if (!userRes.ok) { logout(); return; }
+
+            const user = await userRes.json();
+            const spotify = await spotifyRes.json();
+
+            document.getElementById('userName').textContent = user.name;
+            
+            // Show Spotify banner
+            const banner = document.getElementById('spotifyBanner');
+            banner.classList.remove('hidden');
+            
+            if (spotify.linked) {
+                document.getElementById('spotifyStatusText').textContent = 'Spotify Connected';
+                document.getElementById('spotifySubText').textContent = 'Your Spotify Premium is linked and ready';
+                document.getElementById('spotifyBtn').textContent = 'Reconnect';
+                document.getElementById('spotifyBtn').classList.remove('bg-sp-green');
+                document.getElementById('spotifyBtn').classList.add('bg-sp-card', 'text-white', 'border', 'border-white/10');
+                document.getElementById('createBtn').disabled = false;
+            } else {
+                document.getElementById('createBtn').disabled = true;
+            }
+
+            await loadSpaces();
+
+            // Check for spotify=linked callback
+            if (window.location.search.includes('spotify=linked')) {
+                window.history.replaceState({}, '', '/dashboard');
+                location.reload();
+            }
+        } catch (err) {
+            console.error(err);
+        }
+    }
+
+    async function loadSpaces() {
+        const res = await fetch(API + '/api/spaces', { headers });
+        const spaces = await res.json();
+        const grid = document.getElementById('spacesGrid');
+        const empty = document.getElementById('emptyState');
+
+        if (spaces.length === 0) {
+            grid.innerHTML = '';
+            empty.classList.remove('hidden');
+            return;
+        }
+
+        empty.classList.add('hidden');
+        grid.innerHTML = spaces.map(space => `
+            <div class="bg-sp-dark rounded-2xl p-6 border border-white/5 hover:border-white/10 transition-all fade-in">
+                <div class="flex items-start justify-between mb-4">
+                    <div>
+                        <h3 class="font-semibold text-lg">${escHtml(space.name)}</h3>
+                        <p class="text-sp-light text-sm font-mono mt-1">Code: ${space.code}</p>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        ${space.is_active ? '<span class="w-2.5 h-2.5 bg-sp-green rounded-full pulse-dot"></span><span class="text-sp-green text-xs font-medium">Live</span>' : '<span class="w-2.5 h-2.5 bg-sp-light/50 rounded-full"></span><span class="text-sp-light text-xs">Inactive</span>'}
+                    </div>
+                </div>
+                <div class="flex flex-wrap gap-2 mt-4">
+                    <button onclick="toggleSpace('${space.code}', ${space.is_active})" class="px-4 py-2 text-xs font-semibold rounded-full transition-colors ${space.is_active ? 'bg-red-500/10 text-red-400 hover:bg-red-500/20 border border-red-500/20' : 'bg-sp-green/10 text-sp-green hover:bg-sp-green/20 border border-sp-green/20'}">
+                        ${space.is_active ? 'Deactivate' : 'Activate'}
+                    </button>
+                    <button onclick="showQr('${space.code}')" class="px-4 py-2 text-xs font-semibold rounded-full bg-sp-card text-white hover:bg-white/10 border border-white/10 transition-colors">
+                        QR Code
+                    </button>
+                    <button onclick="deleteSpace('${space.code}')" class="px-4 py-2 text-xs font-semibold rounded-full text-sp-light hover:text-red-400 hover:bg-red-500/10 transition-colors">
+                        Delete
+                    </button>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    async function linkSpotify() {
+        const res = await fetch(API + '/api/spotify/link', { headers });
+        const data = await res.json();
+        window.location.href = data.auth_url;
+    }
+
+    function showCreateModal() {
+        document.getElementById('createModal').classList.remove('hidden');
+        document.getElementById('createModal').classList.add('flex');
+        document.getElementById('spaceName').focus();
+    }
+
+    function closeCreateModal() {
+        document.getElementById('createModal').classList.add('hidden');
+        document.getElementById('createModal').classList.remove('flex');
+    }
+
+    async function createSpace(e) {
+        e.preventDefault();
+        const name = document.getElementById('spaceName').value.trim();
+        if (!name) return;
+
+        const res = await fetch(API + '/api/spaces', {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ name }),
+        });
+
+        if (res.ok) {
+            closeCreateModal();
+            document.getElementById('spaceName').value = '';
+            await loadSpaces();
+        } else {
+            const data = await res.json();
+            alert(data.detail || 'Failed to create space');
+        }
+    }
+
+    async function toggleSpace(code, isActive) {
+        const endpoint = isActive ? 'deactivate' : 'activate';
+        const res = await fetch(API + `/api/spaces/${code}/${endpoint}`, { method: 'PATCH', headers });
+        if (res.ok) await loadSpaces();
+        else {
+            const data = await res.json();
+            alert(data.detail || 'Failed to toggle space');
+        }
+    }
+
+    function showQr(code) {
+        const modal = document.getElementById('qrModal');
+        modal.classList.remove('hidden');
+        modal.classList.add('flex');
+        document.getElementById('qrImage').src = API + `/api/spaces/${code}/qr`;
+        document.getElementById('qrDownload').href = API + `/api/spaces/${code}/qr`;
+        document.getElementById('qrUrl').textContent = `${window.location.origin}/s/${code}`;
+    }
+
+    function closeQrModal() {
+        document.getElementById('qrModal').classList.add('hidden');
+        document.getElementById('qrModal').classList.remove('flex');
+    }
+
+    async function deleteSpace(code) {
+        if (!confirm('Delete this space? This cannot be undone.')) return;
+        const res = await fetch(API + `/api/spaces/${code}`, { method: 'DELETE', headers });
+        if (res.ok) await loadSpaces();
+    }
+
+    function logout() {
+        localStorage.removeItem('token');
+        window.location.href = '/';
+    }
+
+    function escHtml(str) {
+        const div = document.createElement('div');
+        div.textContent = str;
+        return div.innerHTML;
+    }
+
+    init();
+    </script>
+</body>
+</html>
