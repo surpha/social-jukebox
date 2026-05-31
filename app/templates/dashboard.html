@@ -136,6 +136,82 @@
         </div>
     </div>
 
+    <!-- Master View Modal -->
+    <div id="masterModal" class="fixed inset-0 z-[100] hidden bg-sp-black overflow-y-auto">
+        <div class="max-w-2xl mx-auto px-4 py-6">
+            <!-- Header -->
+            <div class="flex items-center justify-between mb-6">
+                <div class="flex items-center gap-3">
+                    <button onclick="closeMasterView()" class="w-9 h-9 rounded-full bg-sp-card flex items-center justify-center hover:bg-sp-hover transition-colors">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+                    </button>
+                    <div>
+                        <h2 id="masterSpaceName" class="text-lg font-bold"></h2>
+                        <p class="text-xs text-sp-light">Owner Controls</p>
+                    </div>
+                </div>
+                <div class="flex items-center gap-1.5">
+                    <span class="w-2 h-2 bg-sp-green rounded-full animate-pulse"></span>
+                    <span class="text-xs text-sp-green font-medium">Live</span>
+                </div>
+            </div>
+
+            <!-- Now Playing + Controls -->
+            <section class="bg-gradient-to-b from-sp-card to-sp-dark rounded-2xl p-6 border border-white/5 mb-6">
+                <div class="flex items-center gap-2 mb-4">
+                    <span class="text-xs font-semibold text-sp-green uppercase tracking-wider">Now Playing</span>
+                </div>
+                <div class="flex items-center gap-4 mb-5">
+                    <div id="masterNpArt" class="w-20 h-20 rounded-lg bg-sp-card flex-shrink-0 overflow-hidden shadow-lg">
+                        <div class="w-full h-full bg-sp-card flex items-center justify-center">
+                            <svg class="w-10 h-10 text-sp-light/30" fill="currentColor" viewBox="0 0 24 24"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>
+                        </div>
+                    </div>
+                    <div class="flex-1 min-w-0">
+                        <p id="masterNpTitle" class="font-bold text-base truncate text-sp-light">Nothing playing</p>
+                        <p id="masterNpArtist" class="text-sm text-sp-light/70 truncate mt-0.5">Waiting for music...</p>
+                        <div class="mt-3">
+                            <div class="w-full h-1.5 bg-white/10 rounded-full overflow-hidden">
+                                <div id="masterNpProgress" class="h-full bg-sp-green rounded-full transition-all duration-1000" style="width: 0%"></div>
+                            </div>
+                            <div class="flex justify-between mt-1">
+                                <span id="masterNpElapsed" class="text-[10px] text-sp-light/50">0:00</span>
+                                <span id="masterNpDuration" class="text-[10px] text-sp-light/50">0:00</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Playback Controls -->
+                <div class="flex items-center justify-center gap-6">
+                    <button onclick="controlPlayback('pause')" id="masterPauseBtn" class="w-12 h-12 rounded-full bg-sp-card hover:bg-sp-hover border border-white/10 flex items-center justify-center transition-colors" title="Pause">
+                        <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+                    </button>
+                    <button onclick="controlPlayback('play')" id="masterPlayBtn" class="w-14 h-14 rounded-full bg-sp-green hover:bg-sp-green-hover text-sp-black flex items-center justify-center transition-all hover:scale-105 shadow-lg shadow-sp-green/20" title="Play">
+                        <svg class="w-6 h-6 ml-0.5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                    </button>
+                    <button onclick="controlPlayback('skip')" class="w-12 h-12 rounded-full bg-sp-card hover:bg-sp-hover border border-white/10 flex items-center justify-center transition-colors" title="Skip">
+                        <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>
+                    </button>
+                </div>
+            </section>
+
+            <!-- Queue -->
+            <section>
+                <div class="flex items-center justify-between mb-3">
+                    <h3 class="text-base font-bold">Queue</h3>
+                    <span id="masterQueueCount" class="text-xs text-sp-light bg-sp-card px-2.5 py-1 rounded-full">0 songs</span>
+                </div>
+                <div id="masterQueueList" class="space-y-2">
+                </div>
+                <div id="masterQueueEmpty" class="text-center py-8">
+                    <p class="text-sp-light text-sm">No songs in queue</p>
+                    <p class="text-sp-light/50 text-xs mt-1">Guests can add songs by scanning the QR code</p>
+                </div>
+            </section>
+        </div>
+    </div>
+
     <script>
     const API = '';
     const token = localStorage.getItem('token');
@@ -211,6 +287,9 @@
                     </div>
                 </div>
                 <div class="flex flex-wrap gap-2 mt-4">
+                    <button onclick="openMasterView('${space.code}', '${escHtml(space.name)}')" class="px-4 py-2 text-xs font-semibold rounded-full bg-sp-green/10 text-sp-green hover:bg-sp-green/20 border border-sp-green/20 transition-colors ${space.is_active ? '' : 'hidden'}">
+                        Manage
+                    </button>
                     <button onclick="toggleSpace('${space.code}', ${space.is_active})" class="px-4 py-2 text-xs font-semibold rounded-full transition-colors ${space.is_active ? 'bg-red-500/10 text-red-400 hover:bg-red-500/20 border border-red-500/20' : 'bg-sp-green/10 text-sp-green hover:bg-sp-green/20 border border-sp-green/20'}">
                         ${space.is_active ? 'Deactivate' : 'Activate'}
                     </button>
@@ -302,6 +381,145 @@
         const div = document.createElement('div');
         div.textContent = str;
         return div.innerHTML;
+    }
+
+    // --- Master View ---
+    let masterSpaceCode = null;
+    let masterInterval = null;
+    let masterProgress = 0;
+    let masterDuration = 0;
+    let masterPlaying = false;
+    let masterTrackId = null;
+    let masterProgressTicker = null;
+
+    function openMasterView(code, name) {
+        masterSpaceCode = code;
+        document.getElementById('masterSpaceName').textContent = name;
+        document.getElementById('masterModal').classList.remove('hidden');
+        document.body.style.overflow = 'hidden';
+        loadMasterData();
+        masterInterval = setInterval(loadMasterData, 3000);
+        startMasterProgressTicker();
+    }
+
+    function closeMasterView() {
+        document.getElementById('masterModal').classList.add('hidden');
+        document.body.style.overflow = '';
+        if (masterInterval) clearInterval(masterInterval);
+        if (masterProgressTicker) clearInterval(masterProgressTicker);
+        masterSpaceCode = null;
+    }
+
+    function startMasterProgressTicker() {
+        if (masterProgressTicker) clearInterval(masterProgressTicker);
+        masterProgressTicker = setInterval(() => {
+            if (!masterPlaying || masterDuration <= 0) return;
+            masterProgress = Math.min(masterProgress + 1000, masterDuration);
+            const pct = (masterProgress / masterDuration) * 100;
+            document.getElementById('masterNpProgress').style.width = `${pct}%`;
+            document.getElementById('masterNpElapsed').textContent = formatTime(masterProgress);
+        }, 1000);
+    }
+
+    async function loadMasterData() {
+        if (!masterSpaceCode) return;
+        try {
+            // Fetch now playing from owner's Spotify
+            const npRes = await fetch(API + '/api/spotify/playback/now-playing', { headers });
+            if (npRes.ok) {
+                const np = await npRes.json();
+                if (np.is_playing || np.name) {
+                    const trackChanged = masterTrackId !== (np.name + np.artist);
+                    if (trackChanged) {
+                        masterTrackId = np.name + np.artist;
+                        document.getElementById('masterNpArt').innerHTML = np.album_art
+                            ? `<img src="${escHtml(np.album_art)}" class="w-full h-full object-cover">`
+                            : `<div class="w-full h-full bg-sp-card flex items-center justify-center"><svg class="w-10 h-10 text-sp-light/30" fill="currentColor" viewBox="0 0 24 24"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg></div>`;
+                        document.getElementById('masterNpTitle').textContent = np.name;
+                        document.getElementById('masterNpTitle').classList.remove('text-sp-light');
+                        document.getElementById('masterNpTitle').classList.add('text-white');
+                        document.getElementById('masterNpArtist').textContent = np.artist;
+                        document.getElementById('masterNpDuration').textContent = formatTime(np.duration_ms);
+                    }
+                    const drift = Math.abs(np.progress_ms - masterProgress);
+                    if (trackChanged || drift > 3000) masterProgress = np.progress_ms;
+                    masterDuration = np.duration_ms;
+                    masterPlaying = np.is_playing;
+                    const pct = masterDuration > 0 ? (masterProgress / masterDuration) * 100 : 0;
+                    document.getElementById('masterNpProgress').style.width = `${pct}%`;
+                    document.getElementById('masterNpElapsed').textContent = formatTime(masterProgress);
+
+                    // Toggle play/pause button visibility
+                    document.getElementById('masterPlayBtn').classList.toggle('hidden', np.is_playing);
+                    document.getElementById('masterPauseBtn').classList.toggle('hidden', !np.is_playing);
+                } else {
+                    masterPlaying = false;
+                    document.getElementById('masterPlayBtn').classList.remove('hidden');
+                    document.getElementById('masterPauseBtn').classList.add('hidden');
+                }
+            }
+
+            // Fetch queue
+            const qRes = await fetch(`/api/spaces/${masterSpaceCode}/queue`);
+            if (qRes.ok) {
+                const data = await qRes.json();
+                const list = document.getElementById('masterQueueList');
+                const empty = document.getElementById('masterQueueEmpty');
+                const count = document.getElementById('masterQueueCount');
+
+                const allItems = [];
+                if (data.up_next) allItems.push({ ...data.up_next, is_up_next: true });
+                allItems.push(...data.queue);
+
+                if (allItems.length === 0) {
+                    list.innerHTML = '';
+                    empty.classList.remove('hidden');
+                    count.textContent = '0 songs';
+                } else {
+                    empty.classList.add('hidden');
+                    count.textContent = `${allItems.length} song${allItems.length > 1 ? 's' : ''}`;
+                    list.innerHTML = allItems.map((item, i) => `
+                        <div class="flex items-center gap-3 p-3 rounded-xl ${item.is_up_next ? 'bg-sp-green/5 border border-sp-green/20' : 'bg-sp-dark border border-white/5'}">
+                            <span class="text-xs font-bold w-5 text-center flex-shrink-0 ${item.is_up_next ? 'text-sp-green' : 'text-sp-light/50'}">${item.is_up_next ? '▶' : i + 1}</span>
+                            <img src="${escHtml(item.album_art)}" alt="" class="w-10 h-10 rounded object-cover flex-shrink-0 shadow">
+                            <div class="flex-1 min-w-0">
+                                <p class="text-sm font-medium truncate">${escHtml(item.name)}</p>
+                                <p class="text-xs text-sp-light truncate">${escHtml(item.artist)}</p>
+                            </div>
+                            <div class="flex items-center gap-1 text-xs font-semibold ${item.is_up_next ? 'text-sp-green' : 'text-sp-light'}">
+                                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 15l7-7 7 7"/></svg>
+                                ${item.vote_count}
+                            </div>
+                        </div>
+                    `).join('');
+                }
+            }
+        } catch (err) {
+            console.error('Master view error:', err);
+        }
+    }
+
+    async function controlPlayback(action) {
+        try {
+            const res = await fetch(API + `/api/spotify/playback/${action}`, { method: 'POST', headers });
+            if (res.ok) {
+                // Refresh after a short delay to get new state
+                setTimeout(loadMasterData, 500);
+            } else {
+                const data = await res.json();
+                alert(data.detail || `Failed to ${action}`);
+            }
+        } catch (err) {
+            alert('Network error');
+        }
+    }
+
+    function formatTime(ms) {
+        if (!ms) return '0:00';
+        const s = Math.floor(ms / 1000);
+        const m = Math.floor(s / 60);
+        const sec = s % 60;
+        return `${m}:${sec.toString().padStart(2, '0')}`;
     }
 
     init();

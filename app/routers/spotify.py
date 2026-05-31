@@ -134,3 +134,71 @@ async def spotify_status(current_user: User = Depends(get_current_user)):
     return {
         "linked": current_user.spotify_refresh_token is not None,
     }
+
+
+# --- Playback Controls (owner only) ---
+
+@router.post("/playback/play")
+async def playback_play(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Resume playback."""
+    sp = await get_spotify_client_for_user(current_user, db)
+    try:
+        sp.start_playback()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"status": "playing"}
+
+
+@router.post("/playback/pause")
+async def playback_pause(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Pause playback."""
+    sp = await get_spotify_client_for_user(current_user, db)
+    try:
+        sp.pause_playback()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"status": "paused"}
+
+
+@router.post("/playback/skip")
+async def playback_skip(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Skip to next track."""
+    sp = await get_spotify_client_for_user(current_user, db)
+    try:
+        sp.next_track()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"status": "skipped"}
+
+
+@router.get("/playback/now-playing")
+async def playback_now_playing(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get current playback state for owner dashboard."""
+    sp = await get_spotify_client_for_user(current_user, db)
+    try:
+        playback = sp.current_playback()
+        if not playback or not playback.get("item"):
+            return {"is_playing": False}
+        item = playback["item"]
+        return {
+            "is_playing": playback.get("is_playing", False),
+            "name": item["name"],
+            "artist": ", ".join(a["name"] for a in item["artists"]),
+            "album_art": item["album"]["images"][0]["url"] if item["album"]["images"] else "",
+            "progress_ms": playback.get("progress_ms", 0),
+            "duration_ms": item.get("duration_ms", 0),
+        }
+    except Exception:
+        return {"is_playing": False}
