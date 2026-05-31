@@ -181,7 +181,34 @@
                 <p class="text-sp-light/50 text-xs mt-1">Search above to add the first track!</p>
             </div>
         </section>
+
+        <!-- Recommendations -->
+        <section id="recsSection" class="hidden">
+            <div class="flex items-center justify-between mb-3">
+                <h2 class="text-base font-bold">Recommended</h2>
+                <span class="text-xs text-sp-light">Based on what's playing</span>
+            </div>
+            <div id="recsList" class="space-y-1">
+            </div>
+        </section>
     </main>
+
+    <!-- Confirmation Modal -->
+    <div id="confirmModal" class="fixed inset-0 z-[150] hidden items-end justify-center bg-black/60 backdrop-blur-sm">
+        <div class="bg-sp-dark rounded-t-2xl p-5 w-full max-w-lg border-t border-white/10 shadow-2xl animate-[slide-up_0.2s_ease-out]">
+            <div id="confirmContent" class="flex items-center gap-3 mb-5">
+                <img id="confirmArt" src="" alt="" class="w-14 h-14 rounded-lg object-cover shadow">
+                <div class="flex-1 min-w-0">
+                    <p id="confirmTitle" class="font-semibold text-sm truncate"></p>
+                    <p id="confirmArtist" class="text-xs text-sp-light truncate mt-0.5"></p>
+                </div>
+            </div>
+            <div class="flex gap-3">
+                <button onclick="closeConfirm()" class="flex-1 py-3 border border-white/10 rounded-full font-semibold text-sm hover:bg-sp-card transition-colors">Cancel</button>
+                <button id="confirmBtn" class="flex-1 py-3 bg-sp-green text-sp-black font-bold text-sm rounded-full hover:bg-sp-green-hover transition-colors">Add to Queue</button>
+            </div>
+        </div>
+    </div>
 
     <!-- Toast Notification -->
     <div id="toast" class="fixed bottom-6 left-1/2 -translate-x-1/2 z-[200] hidden">
@@ -251,8 +278,41 @@
         clearBtn.classList.add('hidden');
     }
 
+    // --- Confirmation Modal ---
+    let pendingAction = null;
+
+    function showConfirm(track, action) {
+        pendingAction = { track, action };
+        document.getElementById('confirmArt').src = track.album_art;
+        document.getElementById('confirmTitle').textContent = track.name;
+        document.getElementById('confirmArtist').textContent = track.artist;
+        document.getElementById('confirmBtn').textContent = action === 'add' ? 'Add to Queue' : '▲ Upvote';
+        const modal = document.getElementById('confirmModal');
+        modal.classList.remove('hidden');
+        modal.classList.add('flex');
+    }
+
+    function closeConfirm() {
+        const modal = document.getElementById('confirmModal');
+        modal.classList.add('hidden');
+        modal.classList.remove('flex');
+        pendingAction = null;
+    }
+
+    document.getElementById('confirmBtn').addEventListener('click', async () => {
+        if (!pendingAction) return;
+        const { track, action } = pendingAction;
+        closeConfirm();
+        if (action === 'add') await doAddTrack(track);
+        else if (action === 'vote') await doVote(track.track_id);
+    });
+
     // --- Add Track ---
-    async function addTrack(track) {
+    function addTrack(track) {
+        showConfirm(track, 'add');
+    }
+
+    async function doAddTrack(track) {
         try {
             const res = await fetch(`${API}/add`, {
                 method: 'POST',
@@ -276,10 +336,17 @@
     }
 
     // --- Vote ---
-    async function vote(trackId, btn) {
-        btn.classList.add('vote-pop');
-        setTimeout(() => btn.classList.remove('vote-pop'), 300);
+    function vote(trackId, btn) {
+        // Find the track info from the current queue for confirm modal
+        const item = lastQueueData?.queue?.find(i => i.track_id === trackId);
+        if (item) {
+            showConfirm({ track_id: item.track_id, name: item.name, artist: item.artist, album_art: item.album_art }, 'vote');
+        } else {
+            doVote(trackId);
+        }
+    }
 
+    async function doVote(trackId) {
         try {
             const res = await fetch(`${API}/vote`, {
                 method: 'POST',
@@ -288,12 +355,7 @@
             });
 
             if (res.ok) {
-                const data = await res.json();
-                // Optimistic update
-                const countEl = btn.querySelector('.vote-count');
-                if (countEl) countEl.textContent = data.vote_count;
-                btn.classList.add('bg-sp-green/20', 'border-sp-green/50');
-                btn.disabled = true;
+                showToast('Vote counted!');
                 loadQueue();
             } else if (res.status === 409) {
                 showToast('Already voted!');
@@ -303,11 +365,30 @@
         }
     }
 
+    let lastQueueData = null;
+    let progressInterval = null;
+    let currentProgress = 0;
+    let currentDuration = 0;
+    let isPlaying = false;
+
+    // Smooth progress bar: interpolate between API polls
+    function startProgressTicker() {
+        if (progressInterval) clearInterval(progressInterval);
+        progressInterval = setInterval(() => {
+            if (!isPlaying || currentDuration <= 0) return;
+            currentProgress = Math.min(currentProgress + 1000, currentDuration);
+            const pct = (currentProgress / currentDuration) * 100;
+            document.getElementById('npProgress').style.width = `${pct}%`;
+            document.getElementById('npElapsed').textContent = formatTime(currentProgress);
+        }, 1000);
+    }
+
     // --- Load Queue ---
     async function loadQueue() {
         try {
             const res = await fetch(`${API}/queue`);
             const data = await res.json();
+            lastQueueData = data;
 
             // Update Now Playing
             if (data.now_playing && data.now_playing.is_playing) {
@@ -320,10 +401,16 @@
                 document.getElementById('npTitle').classList.add('text-white');
                 document.getElementById('npArtist').textContent = np.artist;
                 
-                const progress = np.duration_ms > 0 ? (np.progress_ms / np.duration_ms) * 100 : 0;
+                // Sync progress from server
+                currentProgress = np.progress_ms;
+                currentDuration = np.duration_ms;
+                isPlaying = true;
+                const progress = currentDuration > 0 ? (currentProgress / currentDuration) * 100 : 0;
                 document.getElementById('npProgress').style.width = `${progress}%`;
-                document.getElementById('npElapsed').textContent = formatTime(np.progress_ms);
-                document.getElementById('npDuration').textContent = formatTime(np.duration_ms);
+                document.getElementById('npElapsed').textContent = formatTime(currentProgress);
+                document.getElementById('npDuration').textContent = formatTime(currentDuration);
+            } else {
+                isPlaying = false;
             }
 
             // Update Up Next
@@ -402,8 +489,40 @@
         return str.replace(/'/g, '&#39;').replace(/"/g, '&quot;');
     }
 
+    // --- Load Recommendations ---
+    async function loadRecommendations() {
+        try {
+            const res = await fetch(`${API}/recommendations`);
+            const tracks = await res.json();
+            const recsSection = document.getElementById('recsSection');
+            const recsList = document.getElementById('recsList');
+
+            if (tracks && tracks.length > 0) {
+                recsSection.classList.remove('hidden');
+                recsList.innerHTML = tracks.slice(0, 5).map(t => `
+                    <div class="flex items-center gap-3 p-2.5 rounded-lg hover:bg-sp-card/80 transition-colors group fade-in cursor-pointer" onclick="addTrack(${escAttr(JSON.stringify(t))})">
+                        <img src="${escHtml(t.album_art)}" alt="" class="w-10 h-10 rounded object-cover flex-shrink-0">
+                        <div class="flex-1 min-w-0">
+                            <p class="text-sm font-medium truncate">${escHtml(t.name)}</p>
+                            <p class="text-xs text-sp-light truncate">${escHtml(t.artist)}</p>
+                        </div>
+                        <button class="w-7 h-7 rounded-full bg-sp-green/10 text-sp-green flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 4v16m8-8H4"/>
+                            </svg>
+                        </button>
+                    </div>
+                `).join('');
+            }
+        } catch (err) {
+            // Silent fail for recommendations
+        }
+    }
+
     // --- Init ---
     loadQueue();
+    startProgressTicker();
+    loadRecommendations();
     refreshInterval = setInterval(loadQueue, 3000);
     </script>
 </body>

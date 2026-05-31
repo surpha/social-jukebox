@@ -69,6 +69,52 @@ async def search_tracks(
     ]
 
 
+@router.get("/recommendations", response_model=list[SearchResult])
+async def get_recommendations(
+    code: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Get recommendations based on what's currently playing."""
+    space, owner = await _get_space_with_owner(code, db)
+    sp = await get_spotify_client_for_user(owner, db)
+
+    # Get currently playing track as seed
+    seed_tracks = []
+    try:
+        playback = sp.current_playback()
+        if playback and playback.get("item"):
+            seed_tracks.append(playback["item"]["id"])
+    except Exception:
+        pass
+
+    if not seed_tracks:
+        # Fallback: get user's top tracks as seeds
+        try:
+            top = sp.current_user_top_tracks(limit=2, time_range="short_term")
+            seed_tracks = [t["id"] for t in top.get("items", [])[:2]]
+        except Exception:
+            pass
+
+    if not seed_tracks:
+        return []
+
+    try:
+        recs = sp.recommendations(seed_tracks=seed_tracks[:5], limit=6)
+        tracks = recs.get("tracks", [])
+        return [
+            SearchResult(
+                track_id=t["id"],
+                name=t["name"],
+                artist=", ".join(a["name"] for a in t["artists"]),
+                album_art=t["album"]["images"][0]["url"] if t["album"]["images"] else "",
+                duration_ms=t["duration_ms"],
+            )
+            for t in tracks
+        ]
+    except Exception:
+        return []
+
+
 @router.post("/add", status_code=status.HTTP_201_CREATED)
 async def add_track(
     code: str,
