@@ -202,3 +202,26 @@ async def playback_now_playing(
         }
     except Exception:
         return {"is_playing": False}
+
+
+@router.get("/playback/queue")
+async def playback_queue(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get Spotify's actual queue (next tracks lined up)."""
+    sp = await get_spotify_client_for_user(current_user, db)
+    try:
+        queue_data = sp.queue()
+        tracks = queue_data.get("queue", [])[:10]
+        return [
+            {
+                "name": t["name"],
+                "artist": ", ".join(a["name"] for a in t["artists"]),
+                "album_art": t["album"]["images"][0]["url"] if t["album"]["images"] else "",
+                "duration_ms": t.get("duration_ms", 0),
+            }
+            for t in tracks
+        ]
+    except Exception:
+        return []
