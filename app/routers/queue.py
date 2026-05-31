@@ -384,8 +384,8 @@ async def get_queue(
                 vote_count=up_next_item.vote_count,
             )
         else:
-            # Already played or skipped — clean it up
-            up_next_item.status = "played"
+            # Already played or skipped — remove the stale entry
+            await db.delete(up_next_item)
             await db.commit()
 
     # Build Spotify queue list for display (filter out now playing and up_next)
