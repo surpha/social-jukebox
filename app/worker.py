@@ -64,12 +64,15 @@ class WorkerManager:
     async def _poll_loop(self, space_id: uuid.UUID, user_id: uuid.UUID):
         """Main polling loop for a space. Checks playback every 5 seconds."""
         logger.info(f"Poll loop started for space {space_id}")
-        last_queued_track: str | None = None
+        last_known_track_id: str | None = None
+        has_queued_for_current: bool = False
 
         while True:
             try:
                 await asyncio.sleep(5)
-                await self._check_and_queue(space_id, user_id, last_queued_track)
+                last_known_track_id, has_queued_for_current = await self._check_and_queue(
+                    space_id, user_id, last_known_track_id, has_queued_for_current
+                )
             except asyncio.CancelledError:
                 break
             except Exception as e:
@@ -77,20 +80,21 @@ class WorkerManager:
                 await asyncio.sleep(10)  # Back off on error
 
     async def _check_and_queue(
-        self, space_id: uuid.UUID, user_id: uuid.UUID, last_queued_track: str | None
-    ):
-        """Check current playback and queue next track if needed."""
+        self, space_id: uuid.UUID, user_id: uuid.UUID,
+        last_known_track_id: str | None, has_queued_for_current: bool
+    ) -> tuple[str | None, bool]:
+        """Check current playback and queue next track when song changes."""
         async with async_session() as db:
             # Get user with fresh tokens
             result = await db.execute(select(User).where(User.id == user_id))
             user = result.scalar_one_or_none()
             if not user or not user.spotify_refresh_token:
-                return
+                return last_known_track_id, has_queued_for_current
 
             # Get Spotify client
             sp = get_spotify_client(user)
             if not sp:
-                return
+                return last_known_track_id, has_queued_for_current
 
             # Persist refreshed token if needed
             if hasattr(user, "_refreshed_token"):
@@ -108,28 +112,32 @@ class WorkerManager:
                 playback = sp.current_playback()
             except Exception as e:
                 logger.warning(f"Failed to get playback for space {space_id}: {e}")
-                return
+                return last_known_track_id, has_queued_for_current
 
             if not playback or not playback.get("item"):
-                return
+                return last_known_track_id, has_queued_for_current
 
             current_track_id = playback["item"]["id"]
-            duration_ms = playback["item"]["duration_ms"]
-            progress_ms = playback.get("progress_ms", 0)
-            remaining_ms = duration_ms - progress_ms
 
-            # Mark any queued track as 'played' if it's now the current track
-            queued_result = await db.execute(
-                select(QueueItem)
-                .where(QueueItem.space_id == space_id, QueueItem.status == "queued")
-            )
-            for queued_item in queued_result.scalars().all():
-                if queued_item.track_id == current_track_id:
-                    queued_item.status = "played"
-                    await db.commit()
+            # Detect track change: new song started playing
+            track_changed = (last_known_track_id is not None and current_track_id != last_known_track_id)
 
-            # If less than 15 seconds remaining, queue the next track
-            if remaining_ms < 15000:
+            if track_changed:
+                # Mark any queued tracks that match the new current track as 'played'
+                queued_result = await db.execute(
+                    select(QueueItem)
+                    .where(QueueItem.space_id == space_id, QueueItem.status == "queued")
+                )
+                for queued_item in queued_result.scalars().all():
+                    if queued_item.track_id == current_track_id:
+                        queued_item.status = "played"
+                await db.commit()
+
+                # Reset flag: we haven't queued for this new track yet
+                has_queued_for_current = False
+
+            # Queue next track if we haven't already for the current song
+            if not has_queued_for_current:
                 # Get top-voted pending track
                 result = await db.execute(
                     select(QueueItem)
@@ -139,24 +147,21 @@ class WorkerManager:
                 )
                 top_item = result.scalar_one_or_none()
 
-                if not top_item:
-                    return
+                if top_item:
+                    # Push to Spotify queue
+                    try:
+                        sp.add_to_queue(f"spotify:track:{top_item.track_id}")
+                        top_item.status = "queued"
+                        await db.commit()
+                        has_queued_for_current = True
+                        logger.info(
+                            f"Queued '{top_item.name}' by {top_item.artist} "
+                            f"(votes: {top_item.vote_count}) in space {space_id}"
+                        )
+                    except Exception as e:
+                        logger.error(f"Failed to add to Spotify queue: {e}")
 
-                # Don't re-queue the same track
-                if top_item.track_id == last_queued_track:
-                    return
-
-                # Push to Spotify queue
-                try:
-                    sp.add_to_queue(f"spotify:track:{top_item.track_id}")
-                    top_item.status = "queued"
-                    await db.commit()
-                    logger.info(
-                        f"Queued '{top_item.name}' by {top_item.artist} "
-                        f"(votes: {top_item.vote_count}) in space {space_id}"
-                    )
-                except Exception as e:
-                    logger.error(f"Failed to add to Spotify queue: {e}")
+            return current_track_id, has_queued_for_current
 
 
 # Global singleton
