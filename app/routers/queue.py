@@ -75,6 +75,8 @@ async def get_recommendations(
     db: AsyncSession = Depends(get_db),
 ):
     """Get recommendations based on what's currently playing."""
+    import random
+
     space, owner = await _get_space_with_owner(code, db)
     sp = await get_spotify_client_for_user(owner, db)
 
@@ -117,12 +119,18 @@ async def get_recommendations(
         except Exception:
             pass
 
-    # Try Spotify recommendations API first
+    # Try Spotify recommendations API with randomized params for variety
     if seed_tracks:
         try:
-            recs = sp.recommendations(seed_tracks=seed_tracks[:5], limit=6)
+            kwargs = {
+                "seed_tracks": seed_tracks[:5],
+                "limit": 10,
+                "min_popularity": random.randint(20, 50),
+            }
+            recs = sp.recommendations(**kwargs)
             tracks = recs.get("tracks", [])
             if tracks:
+                random.shuffle(tracks)
                 return [
                     SearchResult(
                         track_id=t["id"],
@@ -131,16 +139,19 @@ async def get_recommendations(
                         album_art=t["album"]["images"][0]["url"] if t["album"]["images"] else "",
                         duration_ms=t["duration_ms"],
                     )
-                    for t in tracks
+                    for t in tracks[:6]
                 ]
         except Exception:
             pass
 
     # Fallback: genre-based recommendations
     try:
-        recs = sp.recommendations(seed_genres=["pop", "rock", "hip-hop"], limit=6)
+        genres = ["pop", "rock", "hip-hop", "electronic", "indie", "r-n-b"]
+        random.shuffle(genres)
+        recs = sp.recommendations(seed_genres=genres[:3], limit=10, min_popularity=random.randint(30, 60))
         tracks = recs.get("tracks", [])
         if tracks:
+            random.shuffle(tracks)
             return [
                 SearchResult(
                     track_id=t["id"],
@@ -149,7 +160,7 @@ async def get_recommendations(
                     album_art=t["album"]["images"][0]["url"] if t["album"]["images"] else "",
                     duration_ms=t["duration_ms"],
                 )
-                for t in tracks
+                for t in tracks[:6]
             ]
     except Exception:
         pass
@@ -157,7 +168,8 @@ async def get_recommendations(
     # Last resort fallback: search for similar artist or popular tracks
     try:
         query = f"artist:{current_artist}" if current_artist else "top hits 2024"
-        results = sp.search(q=query, type="track", limit=6)
+        offset = random.randint(0, 20)
+        results = sp.search(q=query, type="track", limit=6, offset=offset)
         tracks = results.get("tracks", {}).get("items", [])
         return [
             SearchResult(
