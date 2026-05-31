@@ -407,6 +407,7 @@
     let currentTrackId = null;
     let lastQueueFingerprint = '';
     let lastUpNextId = null;
+    let lastSpotifyQueueFingerprint = '';
 
     // Smooth progress bar: interpolate between API polls
     function startProgressTicker() {
@@ -522,27 +523,31 @@
                 }
             }
 
-            // Update Spotify Queue section
+            // Update Spotify Queue section (only if changed)
             const spotifyQueueSection = document.getElementById('spotifyQueueSection');
             const spotifyQueueList = document.getElementById('spotifyQueueList');
-            if (data.spotify_queue && data.spotify_queue.length > 0) {
-                spotifyQueueSection.classList.remove('hidden');
-                spotifyQueueList.innerHTML = data.spotify_queue.map(t => `
-                    <div class="flex items-center gap-3 p-2.5 rounded-lg hover:bg-sp-card/80 transition-colors">
-                        <img src="${escHtml(t.album_art)}" alt="" class="w-10 h-10 rounded object-cover flex-shrink-0">
-                        <div class="flex-1 min-w-0">
-                            <p class="text-sm font-medium truncate">${escHtml(t.name)}</p>
-                            <p class="text-xs text-sp-light truncate">${escHtml(t.artist)}</p>
+            const sqFingerprint = (data.spotify_queue || []).map(t => t.track_id).join('|');
+            if (sqFingerprint !== lastSpotifyQueueFingerprint) {
+                lastSpotifyQueueFingerprint = sqFingerprint;
+                if (data.spotify_queue && data.spotify_queue.length > 0) {
+                    spotifyQueueSection.classList.remove('hidden');
+                    spotifyQueueList.innerHTML = data.spotify_queue.map(t => `
+                        <div class="flex items-center gap-3 p-2.5 rounded-lg hover:bg-sp-card/80 transition-colors">
+                            <img src="${escHtml(t.album_art)}" alt="" class="w-10 h-10 rounded object-cover flex-shrink-0">
+                            <div class="flex-1 min-w-0">
+                                <p class="text-sm font-medium truncate">${escHtml(t.name)}</p>
+                                <p class="text-xs text-sp-light truncate">${escHtml(t.artist)}</p>
+                            </div>
+                            <button onclick="quickAdd(${escAttr(JSON.stringify(t))}, this)" class="w-8 h-8 rounded-full bg-sp-green text-sp-black flex items-center justify-center flex-shrink-0 hover:scale-110 active:scale-95 transition-transform shadow-sm">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 4v16m8-8H4"/>
+                                </svg>
+                            </button>
                         </div>
-                        <button onclick="quickAdd(${escAttr(JSON.stringify(t))}, this)" class="w-8 h-8 rounded-full bg-sp-green text-sp-black flex items-center justify-center flex-shrink-0 hover:scale-110 active:scale-95 transition-transform shadow-sm">
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 4v16m8-8H4"/>
-                            </svg>
-                        </button>
-                    </div>
-                `).join('');
-            } else {
-                spotifyQueueSection.classList.add('hidden');
+                    `).join('');
+                } else {
+                    spotifyQueueSection.classList.add('hidden');
+                }
             }
         } catch (err) {
             console.error('Queue load error:', err);

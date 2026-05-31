@@ -457,6 +457,8 @@
     let masterPlaying = false;
     let masterTrackId = null;
     let masterProgressTicker = null;
+    let lastMasterSpotifyQueueFp = '';
+    let lastMasterQueueFp = '';
 
     function openMasterView(code, name) {
         masterSpaceCode = code;
@@ -531,42 +533,53 @@
             const empty = document.getElementById('masterQueueEmpty');
             const count = document.getElementById('masterQueueCount');
 
-            // Up Next section
+            // Up Next section (only update if changed)
             const upNextSection = document.getElementById('masterUpNext');
+            const upNextId = data.up_next ? data.up_next.track_id + data.up_next.vote_count : '';
             if (data.up_next) {
-                upNextSection.classList.remove('hidden');
-                document.getElementById('masterUnArt').src = data.up_next.album_art;
-                document.getElementById('masterUnTitle').textContent = data.up_next.name;
-                document.getElementById('masterUnArtist').textContent = data.up_next.artist;
-                document.getElementById('masterUnVotes').textContent = data.up_next.vote_count;
+                if (upNextSection.dataset.fp !== upNextId) {
+                    upNextSection.dataset.fp = upNextId;
+                    upNextSection.classList.remove('hidden');
+                    document.getElementById('masterUnArt').src = data.up_next.album_art;
+                    document.getElementById('masterUnTitle').textContent = data.up_next.name;
+                    document.getElementById('masterUnArtist').textContent = data.up_next.artist;
+                    document.getElementById('masterUnVotes').textContent = data.up_next.vote_count;
+                }
             } else {
-                upNextSection.classList.add('hidden');
+                if (upNextSection.dataset.fp !== '') {
+                    upNextSection.dataset.fp = '';
+                    upNextSection.classList.add('hidden');
+                }
             }
 
-            // Queue list
-            if (data.queue.length === 0) {
-                list.innerHTML = '';
-                empty.classList.remove('hidden');
-                count.textContent = '0 songs';
-            } else {
-                empty.classList.add('hidden');
-                count.textContent = `${data.queue.length} song${data.queue.length > 1 ? 's' : ''}`;
-                list.innerHTML = data.queue.map((item, i) => `
-                    <div class="flex items-center gap-3 p-3 rounded-xl bg-sp-dark border border-white/5">
-                        <span class="text-xs font-bold w-5 text-center flex-shrink-0 text-sp-light/50">${i + 1}</span>
-                        <img src="${escHtml(item.album_art)}" alt="" class="w-10 h-10 rounded object-cover flex-shrink-0 shadow">
-                        <div class="flex-1 min-w-0">
-                            <p class="text-sm font-medium truncate">${escHtml(item.name)}</p>
-                            <p class="text-xs text-sp-light truncate">${escHtml(item.artist)}</p>
+            // Queue list (only rebuild if changed)
+            const queueFp = data.queue.map(i => `${i.track_id}:${i.vote_count}:${i.has_voted}`).join('|');
+            if (queueFp !== lastMasterQueueFp) {
+                lastMasterQueueFp = queueFp;
+                if (data.queue.length === 0) {
+                    list.innerHTML = '';
+                    empty.classList.remove('hidden');
+                    count.textContent = '0 songs';
+                } else {
+                    empty.classList.add('hidden');
+                    count.textContent = `${data.queue.length} song${data.queue.length > 1 ? 's' : ''}`;
+                    list.innerHTML = data.queue.map((item, i) => `
+                        <div class="flex items-center gap-3 p-3 rounded-xl bg-sp-dark border border-white/5">
+                            <span class="text-xs font-bold w-5 text-center flex-shrink-0 text-sp-light/50">${i + 1}</span>
+                            <img src="${escHtml(item.album_art)}" alt="" class="w-10 h-10 rounded object-cover flex-shrink-0 shadow">
+                            <div class="flex-1 min-w-0">
+                                <p class="text-sm font-medium truncate">${escHtml(item.name)}</p>
+                                <p class="text-xs text-sp-light truncate">${escHtml(item.artist)}</p>
+                            </div>
+                            <button onclick="masterVote('${item.track_id}', this)" 
+                                class="flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-sm font-semibold transition-all flex-shrink-0 ${item.has_voted ? 'bg-sp-green/20 border-sp-green/50 text-sp-green' : 'border-white/10 text-sp-light hover:border-sp-green/50 hover:text-sp-green hover:bg-sp-green/10'}"
+                                ${item.has_voted ? 'disabled' : ''}>
+                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 15l7-7 7 7"/></svg>
+                                <span>${item.vote_count}</span>
+                            </button>
                         </div>
-                        <button onclick="masterVote('${item.track_id}', this)" 
-                            class="flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-sm font-semibold transition-all flex-shrink-0 ${item.has_voted ? 'bg-sp-green/20 border-sp-green/50 text-sp-green' : 'border-white/10 text-sp-light hover:border-sp-green/50 hover:text-sp-green hover:bg-sp-green/10'}"
-                            ${item.has_voted ? 'disabled' : ''}>
-                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 15l7-7 7 7"/></svg>
-                            <span>${item.vote_count}</span>
-                        </button>
-                    </div>
-                `).join('');
+                    `).join('');
+                }
             }
 
             // Spotify Queue section (always show if available)
@@ -637,6 +650,10 @@
     }
 
     function renderSpotifyQueue(tracks) {
+        const fp = (tracks || []).map(t => t.track_id).join('|');
+        if (fp === lastMasterSpotifyQueueFp) return;
+        lastMasterSpotifyQueueFp = fp;
+
         const section = document.getElementById('masterSpotifyQueueSection');
         const list = document.getElementById('masterSpotifyQueueList');
         if (tracks && tracks.length > 0) {
