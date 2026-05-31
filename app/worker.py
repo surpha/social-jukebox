@@ -113,9 +113,20 @@ class WorkerManager:
             if not playback or not playback.get("item"):
                 return
 
+            current_track_id = playback["item"]["id"]
             duration_ms = playback["item"]["duration_ms"]
             progress_ms = playback.get("progress_ms", 0)
             remaining_ms = duration_ms - progress_ms
+
+            # Mark any queued track as 'played' if it's now the current track
+            queued_result = await db.execute(
+                select(QueueItem)
+                .where(QueueItem.space_id == space_id, QueueItem.status == "queued")
+            )
+            for queued_item in queued_result.scalars().all():
+                if queued_item.track_id == current_track_id:
+                    queued_item.status = "played"
+                    await db.commit()
 
             # If less than 15 seconds remaining, queue the next track
             if remaining_ms < 15000:
