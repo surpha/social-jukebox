@@ -328,6 +328,8 @@
             if (res.ok) {
                 showToast('Added to queue!');
                 clearSearch();
+                // Force refresh fingerprint so next poll picks up the new item
+                lastQueueFingerprint = '';
                 loadQueue();
             } else if (res.status === 409) {
                 showToast('Already in queue');
@@ -352,6 +354,17 @@
     }
 
     async function doVote(trackId) {
+        // Optimistic UI: update button immediately
+        const queueList = document.getElementById('queueList');
+        const btn = queueList.querySelector(`button[onclick*="'${trackId}'"]`);
+        if (btn) {
+            btn.disabled = true;
+            btn.classList.remove('border-white/10', 'text-sp-light', 'hover:border-sp-green/50', 'hover:text-sp-green', 'hover:bg-sp-green/10');
+            btn.classList.add('bg-sp-green/20', 'border-sp-green/50', 'text-sp-green');
+            const countEl = btn.querySelector('.vote-count');
+            if (countEl) countEl.textContent = parseInt(countEl.textContent) + 1;
+        }
+
         try {
             const res = await fetch(`${API}/vote`, {
                 method: 'POST',
@@ -361,12 +374,15 @@
 
             if (res.ok) {
                 showToast('Vote counted!');
-                loadQueue();
             } else if (res.status === 409) {
                 showToast('Already voted!');
+            } else {
+                // Revert on unexpected error
+                loadQueue();
             }
         } catch (err) {
             console.error('Vote error:', err);
+            loadQueue();
         }
     }
 

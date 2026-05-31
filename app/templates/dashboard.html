@@ -598,21 +598,26 @@
     }
 
     async function masterVote(trackId, btn) {
+        // Optimistic UI: update button immediately
+        btn.disabled = true;
+        btn.classList.remove('border-white/10', 'text-sp-light', 'hover:border-sp-green/50', 'hover:text-sp-green', 'hover:bg-sp-green/10');
+        btn.classList.add('bg-sp-green/20', 'border-sp-green/50', 'text-sp-green');
+        const countEl = btn.querySelector('span');
+        if (countEl) countEl.textContent = parseInt(countEl.textContent) + 1;
+
         try {
             const res = await fetch(`/api/spaces/${masterSpaceCode}/vote`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ track_id: trackId }),
             });
-            if (res.ok) {
-                btn.classList.remove('border-white/10', 'text-sp-light');
-                btn.classList.add('bg-sp-green/20', 'border-sp-green/50', 'text-sp-green');
-                btn.disabled = true;
+            if (!res.ok && res.status !== 409) {
                 loadMasterData();
-            } else if (res.status === 409) {
-                btn.disabled = true;
-                btn.classList.add('bg-sp-green/20', 'border-sp-green/50', 'text-sp-green');
             }
+        } catch (err) {
+            console.error('Vote error:', err);
+            loadMasterData();
+        }
         } catch (err) {
             console.error('Vote error:', err);
         }
