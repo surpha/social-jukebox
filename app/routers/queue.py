@@ -350,10 +350,21 @@ async def get_queue(
         logging.warning(f"Spotify playback fetch failed for space {code}: {type(e).__name__}")
         pass  # If Spotify fails, just show queue without now playing
 
-    # Get the "up next" track - only show truly "queued" (locked-in) items
-    up_next = None
+    # Fetch Spotify's upcoming queue
     from app.schemas import UpNextResponse
+    spotify_queue_track_ids = set()
+    spotify_queue_raw = []
+    try:
+        spotify_queue_data = sp.queue()
+        if spotify_queue_data and spotify_queue_data.get("queue"):
+            spotify_queue_raw = spotify_queue_data["queue"][:10]
+            spotify_queue_track_ids = {t["id"] for t in spotify_queue_raw}
+    except Exception:
+        pass
 
+    # Get the "up next" track - only show truly "queued" (locked-in) items
+    # Verify the item is still in Spotify's queue (not already played/skipped)
+    up_next = None
     up_next_result = await db.execute(
         select(QueueItem)
         .where(QueueItem.space_id == space.id, QueueItem.status == "queued")
@@ -361,38 +372,38 @@ async def get_queue(
     )
     up_next_item = up_next_result.scalar_one_or_none()
     if up_next_item:
-        up_next = UpNextResponse(
-            track_id=up_next_item.track_id,
-            name=up_next_item.name,
-            artist=up_next_item.artist,
-            album_art=up_next_item.album_art,
-            duration_ms=up_next_item.duration_ms,
-            vote_count=up_next_item.vote_count,
-        )
+        if up_next_item.track_id in spotify_queue_track_ids:
+            # Still in Spotify's queue — show it
+            up_next = UpNextResponse(
+                track_id=up_next_item.track_id,
+                name=up_next_item.name,
+                artist=up_next_item.artist,
+                album_art=up_next_item.album_art,
+                duration_ms=up_next_item.duration_ms,
+                vote_count=up_next_item.vote_count,
+            )
+        else:
+            # Already played or skipped — clean it up
+            up_next_item.status = "played"
+            await db.commit()
 
-    # Get Spotify's upcoming queue (always include so users can see what's coming)
+    # Build Spotify queue list for display (filter out now playing and up_next)
     spotify_queue_items = []
-    try:
-        spotify_queue_data = sp.queue()
-        if spotify_queue_data and spotify_queue_data.get("queue"):
-            # Get existing SJ queue track IDs to filter them out
-            existing_track_ids = set()
-            if now_playing:
-                existing_track_ids.add(now_playing.track_id)
-            if up_next_item:
-                existing_track_ids.add(up_next_item.track_id)
+    existing_track_ids = set()
+    if now_playing:
+        existing_track_ids.add(now_playing.track_id)
+    if up_next and up_next_item:
+        existing_track_ids.add(up_next_item.track_id)
 
-            for t in spotify_queue_data["queue"][:8]:
-                if t["id"] not in existing_track_ids:
-                    spotify_queue_items.append(SearchResult(
-                        track_id=t["id"],
-                        name=t["name"],
-                        artist=", ".join(a["name"] for a in t["artists"]),
-                        album_art=t["album"]["images"][0]["url"] if t["album"]["images"] else "",
-                        duration_ms=t["duration_ms"],
-                    ))
-    except Exception:
-        pass
+    for t in spotify_queue_raw[:8]:
+        if t["id"] not in existing_track_ids:
+            spotify_queue_items.append(SearchResult(
+                track_id=t["id"],
+                name=t["name"],
+                artist=", ".join(a["name"] for a in t["artists"]),
+                album_art=t["album"]["images"][0]["url"] if t["album"]["images"] else "",
+                duration_ms=t["duration_ms"],
+            ))
 
     # Get sorted pending queue items
     result = await db.execute(
