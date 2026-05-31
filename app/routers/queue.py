@@ -155,6 +155,19 @@ async def add_track(
     """Add a track to the space's virtual queue."""
     space, _ = await _get_space_with_owner(code, db)
 
+    # Check queue limit (max 50 pending songs per space)
+    from sqlalchemy import func
+
+    count_result = await db.execute(
+        select(func.count()).where(
+            QueueItem.space_id == space.id,
+            QueueItem.status == "pending",
+        )
+    )
+    pending_count = count_result.scalar()
+    if pending_count >= 50:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Queue is full (max 50 songs)")
+
     # Check for duplicate pending track
     result = await db.execute(
         select(QueueItem).where(

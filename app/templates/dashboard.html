@@ -478,85 +478,82 @@
     async function loadMasterData() {
         if (!masterSpaceCode) return;
         try {
-            // Fetch now playing from owner's Spotify
-            const npRes = await fetch(API + '/api/spotify/playback/now-playing', { headers });
-            if (npRes.ok) {
-                const np = await npRes.json();
-                if (np.is_playing || np.name) {
-                    const trackChanged = masterTrackId !== (np.name + np.artist);
-                    if (trackChanged) {
-                        masterTrackId = np.name + np.artist;
-                        document.getElementById('masterNpArt').innerHTML = np.album_art
-                            ? `<img src="${escHtml(np.album_art)}" class="w-full h-full object-cover">`
-                            : `<div class="w-full h-full bg-sp-card flex items-center justify-center"><svg class="w-10 h-10 text-sp-light/30" fill="currentColor" viewBox="0 0 24 24"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg></div>`;
-                        document.getElementById('masterNpTitle').textContent = np.name;
-                        document.getElementById('masterNpTitle').classList.remove('text-sp-light');
-                        document.getElementById('masterNpTitle').classList.add('text-white');
-                        document.getElementById('masterNpArtist').textContent = np.artist;
-                        document.getElementById('masterNpDuration').textContent = formatTime(np.duration_ms);
-                    }
-                    const drift = Math.abs(np.progress_ms - masterProgress);
-                    if (trackChanged || drift > 3000) masterProgress = np.progress_ms;
-                    masterDuration = np.duration_ms;
-                    masterPlaying = np.is_playing;
-                    const pct = masterDuration > 0 ? (masterProgress / masterDuration) * 100 : 0;
-                    document.getElementById('masterNpProgress').style.width = `${pct}%`;
-                    document.getElementById('masterNpElapsed').textContent = formatTime(masterProgress);
+            // Single API call — /queue already includes now_playing from Spotify
+            const qRes = await fetch(`/api/spaces/${masterSpaceCode}/queue`);
+            if (!qRes.ok) return;
+            const data = await qRes.json();
 
-                    // Toggle play/pause button visibility
-                    document.getElementById('masterPlayBtn').classList.toggle('hidden', np.is_playing);
-                    document.getElementById('masterPauseBtn').classList.toggle('hidden', !np.is_playing);
-                } else {
-                    masterPlaying = false;
-                    document.getElementById('masterPlayBtn').classList.remove('hidden');
-                    document.getElementById('masterPauseBtn').classList.add('hidden');
+            // Update Now Playing from queue response
+            const np = data.now_playing;
+            if (np && (np.is_playing || np.name)) {
+                const trackChanged = masterTrackId !== (np.name + np.artist);
+                if (trackChanged) {
+                    masterTrackId = np.name + np.artist;
+                    document.getElementById('masterNpArt').innerHTML = np.album_art
+                        ? `<img src="${escHtml(np.album_art)}" class="w-full h-full object-cover">`
+                        : `<div class="w-full h-full bg-sp-card flex items-center justify-center"><svg class="w-10 h-10 text-sp-light/30" fill="currentColor" viewBox="0 0 24 24"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg></div>`;
+                    document.getElementById('masterNpTitle').textContent = np.name;
+                    document.getElementById('masterNpTitle').classList.remove('text-sp-light');
+                    document.getElementById('masterNpTitle').classList.add('text-white');
+                    document.getElementById('masterNpArtist').textContent = np.artist;
+                    document.getElementById('masterNpDuration').textContent = formatTime(np.duration_ms);
                 }
+                const drift = Math.abs(np.progress_ms - masterProgress);
+                if (trackChanged || drift > 3000) masterProgress = np.progress_ms;
+                masterDuration = np.duration_ms;
+                masterPlaying = np.is_playing;
+                const pct = masterDuration > 0 ? (masterProgress / masterDuration) * 100 : 0;
+                document.getElementById('masterNpProgress').style.width = `${pct}%`;
+                document.getElementById('masterNpElapsed').textContent = formatTime(masterProgress);
+
+                document.getElementById('masterPlayBtn').classList.toggle('hidden', np.is_playing);
+                document.getElementById('masterPauseBtn').classList.toggle('hidden', !np.is_playing);
+            } else {
+                masterPlaying = false;
+                document.getElementById('masterPlayBtn').classList.remove('hidden');
+                document.getElementById('masterPauseBtn').classList.add('hidden');
             }
 
-            // Fetch queue
-            const qRes = await fetch(`/api/spaces/${masterSpaceCode}/queue`);
-            if (qRes.ok) {
-                const data = await qRes.json();
-                const list = document.getElementById('masterQueueList');
-                const empty = document.getElementById('masterQueueEmpty');
-                const count = document.getElementById('masterQueueCount');
+            // Update queue
+            const list = document.getElementById('masterQueueList');
+            const empty = document.getElementById('masterQueueEmpty');
+            const count = document.getElementById('masterQueueCount');
 
-                // Up Next section
-                const upNextSection = document.getElementById('masterUpNext');
-                if (data.up_next) {
-                    upNextSection.classList.remove('hidden');
-                    document.getElementById('masterUnArt').src = data.up_next.album_art;
-                    document.getElementById('masterUnTitle').textContent = data.up_next.name;
-                    document.getElementById('masterUnArtist').textContent = data.up_next.artist;
-                    document.getElementById('masterUnVotes').textContent = data.up_next.vote_count;
-                } else {
-                    upNextSection.classList.add('hidden');
-                }
+            // Up Next section
+            const upNextSection = document.getElementById('masterUpNext');
+            if (data.up_next) {
+                upNextSection.classList.remove('hidden');
+                document.getElementById('masterUnArt').src = data.up_next.album_art;
+                document.getElementById('masterUnTitle').textContent = data.up_next.name;
+                document.getElementById('masterUnArtist').textContent = data.up_next.artist;
+                document.getElementById('masterUnVotes').textContent = data.up_next.vote_count;
+            } else {
+                upNextSection.classList.add('hidden');
+            }
 
-                // Queue list
-                if (data.queue.length === 0) {
-                    // No SJ queue — show Spotify's own queue
-                    await loadSpotifyQueue(list, empty, count);
-                } else {
-                    empty.classList.add('hidden');
-                    count.textContent = `${data.queue.length} song${data.queue.length > 1 ? 's' : ''}`;
-                    list.innerHTML = data.queue.map((item, i) => `
-                        <div class="flex items-center gap-3 p-3 rounded-xl bg-sp-dark border border-white/5">
-                            <span class="text-xs font-bold w-5 text-center flex-shrink-0 text-sp-light/50">${i + 1}</span>
-                            <img src="${escHtml(item.album_art)}" alt="" class="w-10 h-10 rounded object-cover flex-shrink-0 shadow">
-                            <div class="flex-1 min-w-0">
-                                <p class="text-sm font-medium truncate">${escHtml(item.name)}</p>
-                                <p class="text-xs text-sp-light truncate">${escHtml(item.artist)}</p>
-                            </div>
-                            <button onclick="masterVote('${item.track_id}', this)" 
-                                class="flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-sm font-semibold transition-all flex-shrink-0 ${item.has_voted ? 'bg-sp-green/20 border-sp-green/50 text-sp-green' : 'border-white/10 text-sp-light hover:border-sp-green/50 hover:text-sp-green hover:bg-sp-green/10'}"
-                                ${item.has_voted ? 'disabled' : ''}>
-                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 15l7-7 7 7"/></svg>
-                                <span>${item.vote_count}</span>
-                            </button>
+            // Queue list
+            if (data.queue.length === 0) {
+                // No SJ queue — show Spotify's own queue
+                await loadSpotifyQueue(list, empty, count);
+            } else {
+                empty.classList.add('hidden');
+                count.textContent = `${data.queue.length} song${data.queue.length > 1 ? 's' : ''}`;
+                list.innerHTML = data.queue.map((item, i) => `
+                    <div class="flex items-center gap-3 p-3 rounded-xl bg-sp-dark border border-white/5">
+                        <span class="text-xs font-bold w-5 text-center flex-shrink-0 text-sp-light/50">${i + 1}</span>
+                        <img src="${escHtml(item.album_art)}" alt="" class="w-10 h-10 rounded object-cover flex-shrink-0 shadow">
+                        <div class="flex-1 min-w-0">
+                            <p class="text-sm font-medium truncate">${escHtml(item.name)}</p>
+                            <p class="text-xs text-sp-light truncate">${escHtml(item.artist)}</p>
                         </div>
-                    `).join('');
-                }
+                        <button onclick="masterVote('${item.track_id}', this)" 
+                            class="flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-sm font-semibold transition-all flex-shrink-0 ${item.has_voted ? 'bg-sp-green/20 border-sp-green/50 text-sp-green' : 'border-white/10 text-sp-light hover:border-sp-green/50 hover:text-sp-green hover:bg-sp-green/10'}"
+                            ${item.has_voted ? 'disabled' : ''}>
+                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 15l7-7 7 7"/></svg>
+                            <span>${item.vote_count}</span>
+                        </button>
+                    </div>
+                `).join('');
             }
 
             // Load recommendations
