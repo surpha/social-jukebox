@@ -186,9 +186,13 @@
         <!-- Recommendations -->
         <section id="recsSection" class="hidden">
             <div class="flex items-center justify-between mb-3">
-                <h2 class="text-base font-bold">Recommended</h2>
-                <span class="text-xs text-sp-light">Based on what's playing</span>
+                <div class="flex items-center gap-2">
+                    <svg class="w-4 h-4 text-sp-green" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
+                    <h2 class="text-base font-bold">Suggested For You</h2>
+                </div>
+                <button onclick="loadRecommendations(true)" class="text-xs text-sp-green hover:text-sp-green-hover font-medium">Refresh</button>
             </div>
+            <p class="text-xs text-sp-light/60 -mt-1 mb-3">Based on what's playing • tap + to add</p>
             <div id="recsList" class="space-y-1">
             </div>
         </section>
@@ -523,14 +527,15 @@
     // --- Load Recommendations ---
     let lastRecsTrackId = null;
 
-    async function loadRecommendations() {
-        // Only reload recs if the currently playing track changed
+    async function loadRecommendations(force = false) {
+        // Only reload recs if the currently playing track changed (or forced)
         const nowId = currentTrackId;
-        if (nowId && nowId === lastRecsTrackId) return;
+        if (!force && nowId && nowId === lastRecsTrackId) return;
         lastRecsTrackId = nowId;
 
         try {
             const res = await fetch(`${API}/recommendations`);
+            if (!res.ok) { console.warn('Recs API error:', res.status); return; }
             const tracks = await res.json();
             const recsSection = document.getElementById('recsSection');
             const recsList = document.getElementById('recsList');
@@ -538,22 +543,55 @@
             if (tracks && tracks.length > 0) {
                 recsSection.classList.remove('hidden');
                 recsList.innerHTML = tracks.slice(0, 5).map(t => `
-                    <div class="flex items-center gap-3 p-2.5 rounded-lg hover:bg-sp-card/80 transition-colors group fade-in cursor-pointer" onclick="addTrack(${escAttr(JSON.stringify(t))})">
+                    <div class="flex items-center gap-3 p-2.5 rounded-lg hover:bg-sp-card/80 transition-colors fade-in">
                         <img src="${escHtml(t.album_art)}" alt="" class="w-10 h-10 rounded object-cover flex-shrink-0">
                         <div class="flex-1 min-w-0">
                             <p class="text-sm font-medium truncate">${escHtml(t.name)}</p>
                             <p class="text-xs text-sp-light truncate">${escHtml(t.artist)}</p>
                         </div>
-                        <button class="w-7 h-7 rounded-full bg-sp-green/10 text-sp-green flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
-                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <button onclick="quickAdd(${escAttr(JSON.stringify(t))}, this)" class="w-8 h-8 rounded-full bg-sp-green text-sp-black flex items-center justify-center flex-shrink-0 hover:scale-110 active:scale-95 transition-transform shadow-sm">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 4v16m8-8H4"/>
                             </svg>
                         </button>
                     </div>
                 `).join('');
+            } else {
+                recsSection.classList.add('hidden');
             }
         } catch (err) {
             // Silent fail for recommendations
+        }
+    }
+
+    // Quick-add from recommendations (no confirm modal)
+    async function quickAdd(track, btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>';
+        try {
+            const res = await fetch(`${API}/add`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(track),
+            });
+            if (res.ok) {
+                btn.innerHTML = '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>';
+                btn.classList.remove('bg-sp-green', 'text-sp-black');
+                btn.classList.add('bg-sp-green/20', 'text-sp-green');
+                showToast('Added to queue!');
+                loadQueue();
+            } else if (res.status === 409) {
+                btn.innerHTML = '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>';
+                btn.classList.remove('bg-sp-green', 'text-sp-black');
+                btn.classList.add('bg-sp-card', 'text-sp-light');
+                showToast('Already in queue');
+            } else {
+                btn.innerHTML = '!';
+                showToast('Failed to add');
+            }
+        } catch (err) {
+            btn.innerHTML = '!';
+            showToast('Network error');
         }
     }
 

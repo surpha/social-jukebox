@@ -88,15 +88,44 @@ async def get_recommendations(
         pass
 
     if not seed_tracks:
-        # Fallback: get user's top tracks as seeds
+        # Fallback: use tracks already in the queue as seeds
         try:
-            top = sp.current_user_top_tracks(limit=2, time_range="short_term")
-            seed_tracks = [t["id"] for t in top.get("items", [])[:2]]
+            result = await db.execute(
+                select(QueueItem)
+                .where(QueueItem.space_id == space.id, QueueItem.status == "pending")
+                .order_by(QueueItem.vote_count.desc())
+                .limit(3)
+            )
+            queue_items = result.scalars().all()
+            seed_tracks = [item.track_id for item in queue_items]
         except Exception:
             pass
 
     if not seed_tracks:
-        return []
+        # Fallback: get user's top tracks as seeds
+        try:
+            top = sp.current_user_top_tracks(limit=3, time_range="short_term")
+            seed_tracks = [t["id"] for t in top.get("items", [])[:3]]
+        except Exception:
+            pass
+
+    if not seed_tracks:
+        # Last resort: use genre seeds for popular music
+        try:
+            recs = sp.recommendations(seed_genres=["pop", "rock"], limit=6)
+            tracks = recs.get("tracks", [])
+            return [
+                SearchResult(
+                    track_id=t["id"],
+                    name=t["name"],
+                    artist=", ".join(a["name"] for a in t["artists"]),
+                    album_art=t["album"]["images"][0]["url"] if t["album"]["images"] else "",
+                    duration_ms=t["duration_ms"],
+                )
+                for t in tracks
+            ]
+        except Exception:
+            return []
 
     try:
         recs = sp.recommendations(seed_tracks=seed_tracks[:5], limit=6)
