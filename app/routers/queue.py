@@ -278,7 +278,7 @@ async def vote_track(
     db: AsyncSession = Depends(get_db),
     voter_id: str | None = Cookie(default=None),
 ):
-    """Upvote a track in the queue."""
+    """Toggle upvote on a track in the queue."""
     space, _ = await _get_space_with_owner(code, db)
 
     # Find the pending queue item
@@ -299,8 +299,15 @@ async def vote_track(
     result = await db.execute(
         select(Vote).where(Vote.queue_item_id == item.id, Vote.voter_id == vid)
     )
-    if result.scalar_one_or_none():
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Already voted for this track")
+    existing_vote = result.scalar_one_or_none()
+
+    if existing_vote:
+        # Remove vote (toggle off)
+        await db.delete(existing_vote)
+        item.vote_count = max(0, item.vote_count - 1)
+        await db.commit()
+        response.set_cookie(key="voter_id", value=vid, max_age=60*60*24*30, httponly=True, samesite="lax")
+        return {"status": "unvoted", "track_id": body.track_id, "vote_count": item.vote_count}
 
     # Add vote
     vote = Vote(queue_item_id=item.id, voter_id=vid)

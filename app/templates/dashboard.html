@@ -571,9 +571,8 @@
                                 <p class="text-sm font-medium truncate">${escHtml(item.name)}</p>
                                 <p class="text-xs text-sp-light truncate">${escHtml(item.artist)}</p>
                             </div>
-                            <button onclick="masterVote('${item.track_id}', this)" 
-                                class="flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-sm font-semibold transition-all flex-shrink-0 ${item.has_voted ? 'bg-sp-green/20 border-sp-green/50 text-sp-green' : 'border-white/10 text-sp-light hover:border-sp-green/50 hover:text-sp-green hover:bg-sp-green/10'}"
-                                ${item.has_voted ? 'disabled' : ''}>
+                            <button onclick="masterVote('${item.track_id}', this)" data-track="${item.track_id}" data-voted="${item.has_voted}"
+                                class="flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-sm font-semibold transition-all flex-shrink-0 ${item.has_voted ? 'bg-sp-green/20 border-sp-green/50 text-sp-green' : 'border-white/10 text-sp-light hover:border-sp-green/50 hover:text-sp-green hover:bg-sp-green/10'}">
                                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 15l7-7 7 7"/></svg>
                                 <span>${item.vote_count}</span>
                             </button>
@@ -582,8 +581,11 @@
                 }
             }
 
-            // Spotify Queue section (always show if available)
-            renderSpotifyQueue(data.spotify_queue || []);
+            // Spotify Queue section (filter out already-queued tracks)
+            const dashQueuedIds = new Set(data.queue.map(i => i.track_id));
+            if (data.up_next) dashQueuedIds.add(data.up_next.track_id);
+            const filteredSQ = (data.spotify_queue || []).filter(t => !dashQueuedIds.has(t.track_id));
+            renderSpotifyQueue(filteredSQ);
 
             // Load recommendations
             loadMasterRecs();
@@ -627,12 +629,21 @@
     }
 
     async function masterVote(trackId, btn) {
-        // Optimistic UI: update button immediately
-        btn.disabled = true;
-        btn.classList.remove('border-white/10', 'text-sp-light', 'hover:border-sp-green/50', 'hover:text-sp-green', 'hover:bg-sp-green/10');
-        btn.classList.add('bg-sp-green/20', 'border-sp-green/50', 'text-sp-green');
-        const countEl = btn.querySelector('span');
-        if (countEl) countEl.textContent = parseInt(countEl.textContent) + 1;
+        const isVoted = btn.dataset.voted === 'true';
+
+        if (isVoted) {
+            btn.dataset.voted = 'false';
+            btn.classList.remove('bg-sp-green/20', 'border-sp-green/50', 'text-sp-green');
+            btn.classList.add('border-white/10', 'text-sp-light', 'hover:border-sp-green/50', 'hover:text-sp-green', 'hover:bg-sp-green/10');
+            const countEl = btn.querySelector('span');
+            if (countEl) countEl.textContent = Math.max(0, parseInt(countEl.textContent) - 1);
+        } else {
+            btn.dataset.voted = 'true';
+            btn.classList.remove('border-white/10', 'text-sp-light', 'hover:border-sp-green/50', 'hover:text-sp-green', 'hover:bg-sp-green/10');
+            btn.classList.add('bg-sp-green/20', 'border-sp-green/50', 'text-sp-green');
+            const countEl = btn.querySelector('span');
+            if (countEl) countEl.textContent = parseInt(countEl.textContent) + 1;
+        }
 
         try {
             const res = await fetch(`/api/spaces/${masterSpaceCode}/vote`, {
@@ -640,7 +651,7 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ track_id: trackId }),
             });
-            if (!res.ok && res.status !== 409) {
+            if (!res.ok) {
                 loadMasterData();
             }
         } catch (err) {
