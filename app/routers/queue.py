@@ -331,6 +331,7 @@ async def get_queue(
 
     # Get now playing from Spotify
     now_playing = None
+    sp = None
     try:
         sp = await get_spotify_client_for_user(owner, db)
         playback = sp.current_playback()
@@ -348,19 +349,19 @@ async def get_queue(
     except Exception as e:
         import logging
         logging.warning(f"Spotify playback fetch failed for space {code}: {type(e).__name__}")
-        pass  # If Spotify fails, just show queue without now playing
 
     # Fetch Spotify's upcoming queue
     from app.schemas import UpNextResponse
     spotify_queue_track_ids = set()
     spotify_queue_raw = []
-    try:
-        spotify_queue_data = sp.queue()
-        if spotify_queue_data and spotify_queue_data.get("queue"):
-            spotify_queue_raw = spotify_queue_data["queue"][:10]
-            spotify_queue_track_ids = {t["id"] for t in spotify_queue_raw}
-    except Exception:
-        pass
+    if sp:
+        try:
+            spotify_queue_data = sp.queue()
+            if spotify_queue_data and spotify_queue_data.get("queue"):
+                spotify_queue_raw = spotify_queue_data["queue"][:10]
+                spotify_queue_track_ids = {t["id"] for t in spotify_queue_raw}
+        except Exception:
+            pass
 
     # Get the "up next" track - only show truly "queued" (locked-in) items
     # Verify the item is still in Spotify's queue (not already played/skipped)
