@@ -74,15 +74,17 @@ async def get_recommendations(
     code: str,
     db: AsyncSession = Depends(get_db),
 ):
-    """Get recommendations based on what's currently playing."""
+    """Get recommendations based on a mix of current track, queue, and listening history."""
     import random
 
     space, owner = await _get_space_with_owner(code, db)
     sp = await get_spotify_client_for_user(owner, db)
 
-    # Get currently playing track as seed
+    # Gather seeds from multiple sources
     seed_tracks = []
     current_artist = None
+
+    # 1. Currently playing track
     try:
         playback = sp.current_playback()
         if playback and playback.get("item"):
@@ -92,42 +94,63 @@ async def get_recommendations(
     except Exception:
         pass
 
-    if not seed_tracks:
-        # Fallback: use tracks already in the queue as seeds
-        try:
-            result = await db.execute(
-                select(QueueItem)
-                .where(QueueItem.space_id == space.id, QueueItem.status == "pending")
-                .order_by(QueueItem.vote_count.desc())
-                .limit(3)
-            )
-            queue_items = result.scalars().all()
-            seed_tracks = [item.track_id for item in queue_items]
-            if queue_items and not current_artist:
-                current_artist = queue_items[0].artist.split(",")[0].strip()
-        except Exception:
-            pass
+    # 2. Tracks from the queue (pending + queued)
+    try:
+        result = await db.execute(
+            select(QueueItem)
+            .where(QueueItem.space_id == space.id, QueueItem.status.in_(["pending", "queued"]))
+            .order_by(QueueItem.vote_count.desc())
+            .limit(5)
+        )
+        queue_items = result.scalars().all()
+        queue_track_ids = [item.track_id for item in queue_items]
+        seed_tracks.extend(queue_track_ids)
+        if queue_items and not current_artist:
+            current_artist = queue_items[0].artist.split(",")[0].strip()
+    except Exception:
+        pass
 
-    if not seed_tracks:
-        # Fallback: get user's top tracks as seeds
+    # 3. Recently played tracks (from queue history)
+    try:
+        result = await db.execute(
+            select(QueueItem)
+            .where(QueueItem.space_id == space.id, QueueItem.status == "played")
+            .order_by(QueueItem.created_at.desc())
+            .limit(5)
+        )
+        played_items = result.scalars().all()
+        seed_tracks.extend([item.track_id for item in played_items])
+    except Exception:
+        pass
+
+    # 4. User's top tracks as extra variety
+    if len(seed_tracks) < 3:
         try:
             top = sp.current_user_top_tracks(limit=3, time_range="short_term")
             items = top.get("items", [])[:3]
-            seed_tracks = [t["id"] for t in items]
+            seed_tracks.extend([t["id"] for t in items])
             if items and not current_artist:
                 current_artist = items[0]["artists"][0]["name"] if items[0].get("artists") else None
         except Exception:
             pass
 
-    # Try Spotify recommendations API with randomized params for variety
+    # Deduplicate and pick a random subset of up to 5 seeds
+    seed_tracks = list(dict.fromkeys(seed_tracks))  # preserve order, remove dupes
+    if len(seed_tracks) > 5:
+        # Always keep the current track, randomize the rest
+        current = seed_tracks[:1] if seed_tracks else []
+        rest = seed_tracks[1:]
+        random.shuffle(rest)
+        seed_tracks = current + rest[:4]
+
+    # Try Spotify recommendations API
     if seed_tracks:
         try:
-            kwargs = {
-                "seed_tracks": seed_tracks[:5],
-                "limit": 10,
-                "min_popularity": random.randint(20, 50),
-            }
-            recs = sp.recommendations(**kwargs)
+            recs = sp.recommendations(
+                seed_tracks=seed_tracks[:5],
+                limit=12,
+                min_popularity=random.randint(20, 50),
+            )
             tracks = recs.get("tracks", [])
             if tracks:
                 random.shuffle(tracks)
@@ -165,7 +188,7 @@ async def get_recommendations(
     except Exception:
         pass
 
-    # Last resort fallback: search for similar artist or popular tracks
+    # Last resort: search for similar artist or popular tracks
     try:
         query = f"artist:{current_artist}" if current_artist else "top hits 2024"
         offset = random.randint(0, 20)

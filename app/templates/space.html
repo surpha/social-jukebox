@@ -561,8 +561,6 @@
                 return;
             }
             const tracks = await res.json();
-            const recsSection = document.getElementById('recsSection');
-            const recsList = document.getElementById('recsList');
 
             if (tracks && tracks.length > 0) {
                 recsSection.classList.remove('hidden');
