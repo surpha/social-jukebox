@@ -371,6 +371,9 @@
     let currentProgress = 0;
     let currentDuration = 0;
     let isPlaying = false;
+    let currentTrackId = null;
+    let lastQueueFingerprint = '';
+    let lastUpNextId = null;
 
     // Smooth progress bar: interpolate between API polls
     function startProgressTicker() {
@@ -384,79 +387,106 @@
         }, 1000);
     }
 
-    // --- Load Queue ---
+    // --- Load Queue (diff-based updates) ---
     async function loadQueue() {
         try {
             const res = await fetch(`${API}/queue`);
             const data = await res.json();
             lastQueueData = data;
 
-            // Update Now Playing
+            // Update Now Playing (only if track changed)
             if (data.now_playing && data.now_playing.is_playing) {
                 const np = data.now_playing;
-                document.getElementById('npArt').innerHTML = np.album_art 
-                    ? `<img src="${escHtml(np.album_art)}" alt="" class="w-full h-full object-cover">`
-                    : `<div class="w-full h-full bg-sp-card flex items-center justify-center"><svg class="w-8 h-8 text-sp-light/30" fill="currentColor" viewBox="0 0 24 24"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg></div>`;
-                document.getElementById('npTitle').textContent = np.name;
-                document.getElementById('npTitle').classList.remove('text-sp-light');
-                document.getElementById('npTitle').classList.add('text-white');
-                document.getElementById('npArtist').textContent = np.artist;
+                const trackChanged = (currentTrackId !== np.name + np.artist);
                 
-                // Sync progress from server
-                currentProgress = np.progress_ms;
+                if (trackChanged) {
+                    currentTrackId = np.name + np.artist;
+                    const artEl = document.getElementById('npArt');
+                    if (np.album_art) {
+                        const existingImg = artEl.querySelector('img');
+                        if (!existingImg || existingImg.src !== np.album_art) {
+                            artEl.innerHTML = `<img src="${escHtml(np.album_art)}" alt="" class="w-full h-full object-cover">`;
+                        }
+                    } else {
+                        artEl.innerHTML = `<div class="w-full h-full bg-sp-card flex items-center justify-center"><svg class="w-8 h-8 text-sp-light/30" fill="currentColor" viewBox="0 0 24 24"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg></div>`;
+                    }
+                    document.getElementById('npTitle').textContent = np.name;
+                    document.getElementById('npTitle').classList.remove('text-sp-light');
+                    document.getElementById('npTitle').classList.add('text-white');
+                    document.getElementById('npArtist').textContent = np.artist;
+                    document.getElementById('npDuration').textContent = formatTime(np.duration_ms);
+                }
+                
+                // Sync progress only if drift > 3s or track changed
+                const drift = Math.abs(np.progress_ms - currentProgress);
+                if (trackChanged || drift > 3000) {
+                    currentProgress = np.progress_ms;
+                }
                 currentDuration = np.duration_ms;
                 isPlaying = true;
                 const progress = currentDuration > 0 ? (currentProgress / currentDuration) * 100 : 0;
                 document.getElementById('npProgress').style.width = `${progress}%`;
                 document.getElementById('npElapsed').textContent = formatTime(currentProgress);
-                document.getElementById('npDuration').textContent = formatTime(currentDuration);
             } else {
                 isPlaying = false;
             }
 
-            // Update Up Next
+            // Update Up Next (only if changed)
             const upNextSection = document.getElementById('upNextSection');
             if (data.up_next) {
-                upNextSection.classList.remove('hidden');
-                document.getElementById('unArt').src = data.up_next.album_art;
-                document.getElementById('unTitle').textContent = data.up_next.name;
-                document.getElementById('unArtist').textContent = data.up_next.artist;
-                document.getElementById('unVotes').textContent = data.up_next.vote_count;
+                const newUpNextId = data.up_next.track_id + data.up_next.vote_count;
+                if (lastUpNextId !== newUpNextId) {
+                    lastUpNextId = newUpNextId;
+                    upNextSection.classList.remove('hidden');
+                    const unArt = document.getElementById('unArt');
+                    if (unArt.src !== data.up_next.album_art) unArt.src = data.up_next.album_art;
+                    document.getElementById('unTitle').textContent = data.up_next.name;
+                    document.getElementById('unArtist').textContent = data.up_next.artist;
+                    document.getElementById('unVotes').textContent = data.up_next.vote_count;
+                }
             } else {
+                lastUpNextId = null;
                 upNextSection.classList.add('hidden');
             }
 
-            // Update Queue
+            // Update Queue (only rebuild if data changed)
             const queueList = document.getElementById('queueList');
             const queueEmpty = document.getElementById('queueEmpty');
             const queueCount = document.getElementById('queueCount');
+            const newFingerprint = data.queue.map(i => `${i.track_id}:${i.vote_count}:${i.has_voted}`).join('|');
 
             if (data.queue.length === 0) {
-                queueList.innerHTML = '';
+                if (lastQueueFingerprint !== '') {
+                    queueList.innerHTML = '';
+                    lastQueueFingerprint = '';
+                }
                 queueEmpty.classList.remove('hidden');
                 queueCount.textContent = '0 songs';
             } else {
                 queueEmpty.classList.add('hidden');
                 queueCount.textContent = `${data.queue.length} song${data.queue.length > 1 ? 's' : ''}`;
                 
-                queueList.innerHTML = data.queue.map((item, i) => `
-                    <div class="flex items-center gap-3 p-3 rounded-xl bg-sp-dark border border-white/5 hover:border-white/10 transition-all slide-up" style="animation-delay: ${i * 50}ms">
-                        <span class="text-xs text-sp-light/50 font-bold w-5 text-center flex-shrink-0">${i + 1}</span>
-                        <img src="${escHtml(item.album_art)}" alt="" class="w-11 h-11 rounded object-cover flex-shrink-0 shadow">
-                        <div class="flex-1 min-w-0">
-                            <p class="text-sm font-medium truncate">${escHtml(item.name)}</p>
-                            <p class="text-xs text-sp-light truncate">${escHtml(item.artist)}</p>
+                if (newFingerprint !== lastQueueFingerprint) {
+                    lastQueueFingerprint = newFingerprint;
+                    queueList.innerHTML = data.queue.map((item, i) => `
+                        <div class="flex items-center gap-3 p-3 rounded-xl bg-sp-dark border border-white/5 hover:border-white/10 transition-all">
+                            <span class="text-xs text-sp-light/50 font-bold w-5 text-center flex-shrink-0">${i + 1}</span>
+                            <img src="${escHtml(item.album_art)}" alt="" class="w-11 h-11 rounded object-cover flex-shrink-0 shadow">
+                            <div class="flex-1 min-w-0">
+                                <p class="text-sm font-medium truncate">${escHtml(item.name)}</p>
+                                <p class="text-xs text-sp-light truncate">${escHtml(item.artist)}</p>
+                            </div>
+                            <button onclick="vote('${item.track_id}', this)" 
+                                class="flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-sm font-semibold transition-all flex-shrink-0 ${item.has_voted ? 'bg-sp-green/20 border-sp-green/50 text-sp-green' : 'border-white/10 text-sp-light hover:border-sp-green/50 hover:text-sp-green hover:bg-sp-green/10'}" 
+                                ${item.has_voted ? 'disabled' : ''}>
+                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 15l7-7 7 7"/>
+                                </svg>
+                                <span class="vote-count">${item.vote_count}</span>
+                            </button>
                         </div>
-                        <button onclick="vote('${item.track_id}', this)" 
-                            class="flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-sm font-semibold transition-all flex-shrink-0 ${item.has_voted ? 'bg-sp-green/20 border-sp-green/50 text-sp-green' : 'border-white/10 text-sp-light hover:border-sp-green/50 hover:text-sp-green hover:bg-sp-green/10'}" 
-                            ${item.has_voted ? 'disabled' : ''}>
-                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 15l7-7 7 7"/>
-                            </svg>
-                            <span class="vote-count">${item.vote_count}</span>
-                        </button>
-                    </div>
-                `).join('');
+                    `).join('');
+                }
             }
         } catch (err) {
             console.error('Queue load error:', err);
@@ -491,7 +521,14 @@
     }
 
     // --- Load Recommendations ---
+    let lastRecsTrackId = null;
+
     async function loadRecommendations() {
+        // Only reload recs if the currently playing track changed
+        const nowId = currentTrackId;
+        if (nowId && nowId === lastRecsTrackId) return;
+        lastRecsTrackId = nowId;
+
         try {
             const res = await fetch(`${API}/recommendations`);
             const tracks = await res.json();
@@ -524,7 +561,7 @@
     loadQueue();
     startProgressTicker();
     loadRecommendations();
-    refreshInterval = setInterval(loadQueue, 3000);
+    refreshInterval = setInterval(() => { loadQueue(); loadRecommendations(); }, 3000);
     </script>
 </body>
 </html>
