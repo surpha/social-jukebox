@@ -564,16 +564,36 @@
     }
 
     async function controlPlayback(action) {
+        // Optimistic UI update — respond instantly
+        if (action === 'play') {
+            masterPlaying = true;
+            document.getElementById('masterPlayBtn').classList.add('hidden');
+            document.getElementById('masterPauseBtn').classList.remove('hidden');
+        } else if (action === 'pause') {
+            masterPlaying = false;
+            document.getElementById('masterPauseBtn').classList.add('hidden');
+            document.getElementById('masterPlayBtn').classList.remove('hidden');
+        } else if (action === 'skip') {
+            // Show loading state on progress bar
+            document.getElementById('masterNpProgress').style.width = '0%';
+            document.getElementById('masterNpElapsed').textContent = '0:00';
+            masterProgress = 0;
+        }
+
         try {
             const res = await fetch(API + `/api/spotify/playback/${action}`, { method: 'POST', headers });
             if (res.ok) {
-                setTimeout(loadMasterData, 500);
+                // Refresh data to sync actual state
+                setTimeout(loadMasterData, action === 'skip' ? 800 : 300);
             } else {
+                // Revert optimistic update on failure
                 const data = await res.json();
                 alert(data.detail || `Failed to ${action}`);
+                loadMasterData();
             }
         } catch (err) {
             alert('Network error');
+            loadMasterData();
         }
     }
 
