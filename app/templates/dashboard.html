@@ -251,6 +251,18 @@
                 </div>
             </section>
 
+            <!-- Spotify Queue -->
+            <section id="masterSpotifyQueueSection" class="hidden mb-5">
+                <div class="flex items-center justify-between mb-3">
+                    <div class="flex items-center gap-2">
+                        <svg class="w-4 h-4 text-sp-green" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z"/></svg>
+                        <h3 class="text-base font-bold">Coming Up on Spotify</h3>
+                    </div>
+                </div>
+                <p class="text-xs text-sp-light/60 -mt-1 mb-3">From Spotify's queue • tap + to add to SJ queue</p>
+                <div id="masterSpotifyQueueList" class="space-y-1"></div>
+            </section>
+
             <!-- Recommendations -->
             <section id="masterRecsSection" class="hidden mb-8">
                 <div class="flex items-center justify-between mb-3">
@@ -533,8 +545,9 @@
 
             // Queue list
             if (data.queue.length === 0) {
-                // No SJ queue — show Spotify's own queue
-                await loadSpotifyQueue(list, empty, count);
+                list.innerHTML = '';
+                empty.classList.remove('hidden');
+                count.textContent = '0 songs';
             } else {
                 empty.classList.add('hidden');
                 count.textContent = `${data.queue.length} song${data.queue.length > 1 ? 's' : ''}`;
@@ -555,6 +568,9 @@
                     </div>
                 `).join('');
             }
+
+            // Spotify Queue section (always show if available)
+            renderSpotifyQueue(data.spotify_queue || []);
 
             // Load recommendations
             loadMasterRecs();
@@ -620,34 +636,53 @@
         }
     }
 
-    async function loadSpotifyQueue(listEl, emptyEl, countEl) {
-        try {
-            const res = await fetch(API + '/api/spotify/playback/queue', { headers });
-            if (!res.ok) { emptyEl.classList.remove('hidden'); listEl.innerHTML = ''; countEl.textContent = '0 songs'; return; }
-            const tracks = await res.json();
-            if (tracks.length === 0) {
-                listEl.innerHTML = '';
-                emptyEl.classList.remove('hidden');
-                countEl.textContent = '0 songs';
-            } else {
-                emptyEl.classList.add('hidden');
-                countEl.textContent = `${tracks.length} song${tracks.length > 1 ? 's' : ''} (Spotify Queue)`;
-                listEl.innerHTML = tracks.map((t, i) => `
-                    <div class="flex items-center gap-3 p-3 rounded-xl bg-sp-dark border border-white/5 opacity-70">
-                        <span class="text-xs font-bold w-5 text-center flex-shrink-0 text-sp-light/50">${i + 1}</span>
-                        <img src="${escHtml(t.album_art)}" alt="" class="w-10 h-10 rounded object-cover flex-shrink-0 shadow">
-                        <div class="flex-1 min-w-0">
-                            <p class="text-sm font-medium truncate">${escHtml(t.name)}</p>
-                            <p class="text-xs text-sp-light truncate">${escHtml(t.artist)}</p>
-                        </div>
-                        <span class="text-[10px] text-sp-light/50 bg-sp-card px-2 py-0.5 rounded-full">Spotify</span>
+    function renderSpotifyQueue(tracks) {
+        const section = document.getElementById('masterSpotifyQueueSection');
+        const list = document.getElementById('masterSpotifyQueueList');
+        if (tracks && tracks.length > 0) {
+            section.classList.remove('hidden');
+            list.innerHTML = tracks.map(t => `
+                <div class="flex items-center gap-3 p-2.5 rounded-lg hover:bg-sp-card/80 transition-colors">
+                    <img src="${escHtml(t.album_art)}" alt="" class="w-10 h-10 rounded object-cover flex-shrink-0">
+                    <div class="flex-1 min-w-0">
+                        <p class="text-sm font-medium truncate">${escHtml(t.name)}</p>
+                        <p class="text-xs text-sp-light truncate">${escHtml(t.artist)}</p>
                     </div>
-                `).join('');
+                    <button onclick="masterQuickAdd(${escAttr(JSON.stringify(t))}, this)" class="w-8 h-8 rounded-full bg-sp-green text-sp-black flex items-center justify-center flex-shrink-0 hover:scale-110 active:scale-95 transition-transform shadow-sm">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 4v16m8-8H4"/>
+                        </svg>
+                    </button>
+                </div>
+            `).join('');
+        } else {
+            section.classList.add('hidden');
+        }
+    }
+
+    async function masterQuickAdd(track, btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>';
+        try {
+            const res = await fetch(`/api/spaces/${masterSpaceCode}/add`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(track),
+            });
+            if (res.ok) {
+                btn.innerHTML = '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>';
+                btn.classList.remove('bg-sp-green', 'text-sp-black');
+                btn.classList.add('bg-sp-green/20', 'text-sp-green');
+                loadMasterData();
+            } else if (res.status === 409) {
+                btn.innerHTML = '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>';
+                btn.classList.remove('bg-sp-green', 'text-sp-black');
+                btn.classList.add('bg-sp-card', 'text-sp-light');
+            } else {
+                btn.innerHTML = '!';
             }
         } catch (err) {
-            emptyEl.classList.remove('hidden');
-            listEl.innerHTML = '';
-            countEl.textContent = '0 songs';
+            btn.innerHTML = '!';
         }
     }
 

@@ -110,6 +110,7 @@ class QueueResponse(BaseModel):
     now_playing: NowPlayingResponse | None = None
     up_next: UpNextResponse | None = None
     queue: list[QueueItemResponse] = []
+    spotify_queue: list[SearchResult] = []
     space_name: str = ""
 
 
