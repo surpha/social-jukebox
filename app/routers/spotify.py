@@ -21,7 +21,7 @@ import hashlib
 _key = base64.urlsafe_b64encode(hashlib.sha256(settings.secret_key.encode()).digest())
 _fernet = Fernet(_key)
 
-SPOTIFY_SCOPES = "user-modify-playback-state user-read-playback-state user-read-currently-playing"
+SPOTIFY_SCOPES = "user-modify-playback-state user-read-playback-state user-read-currently-playing user-top-read"
 
 
 def _encrypt(value: str) -> str:

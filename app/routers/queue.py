@@ -80,10 +80,13 @@ async def get_recommendations(
 
     # Get currently playing track as seed
     seed_tracks = []
+    current_artist = None
     try:
         playback = sp.current_playback()
         if playback and playback.get("item"):
             seed_tracks.append(playback["item"]["id"])
+            if playback["item"].get("artists"):
+                current_artist = playback["item"]["artists"][0]["name"]
     except Exception:
         pass
 
@@ -98,6 +101,8 @@ async def get_recommendations(
             )
             queue_items = result.scalars().all()
             seed_tracks = [item.track_id for item in queue_items]
+            if queue_items and not current_artist:
+                current_artist = queue_items[0].artist.split(",")[0].strip()
         except Exception:
             pass
 
@@ -105,15 +110,37 @@ async def get_recommendations(
         # Fallback: get user's top tracks as seeds
         try:
             top = sp.current_user_top_tracks(limit=3, time_range="short_term")
-            seed_tracks = [t["id"] for t in top.get("items", [])[:3]]
+            items = top.get("items", [])[:3]
+            seed_tracks = [t["id"] for t in items]
+            if items and not current_artist:
+                current_artist = items[0]["artists"][0]["name"] if items[0].get("artists") else None
         except Exception:
             pass
 
-    if not seed_tracks:
-        # Last resort: use genre seeds for popular music
+    # Try Spotify recommendations API first
+    if seed_tracks:
         try:
-            recs = sp.recommendations(seed_genres=["pop", "rock"], limit=6)
+            recs = sp.recommendations(seed_tracks=seed_tracks[:5], limit=6)
             tracks = recs.get("tracks", [])
+            if tracks:
+                return [
+                    SearchResult(
+                        track_id=t["id"],
+                        name=t["name"],
+                        artist=", ".join(a["name"] for a in t["artists"]),
+                        album_art=t["album"]["images"][0]["url"] if t["album"]["images"] else "",
+                        duration_ms=t["duration_ms"],
+                    )
+                    for t in tracks
+                ]
+        except Exception:
+            pass
+
+    # Fallback: genre-based recommendations
+    try:
+        recs = sp.recommendations(seed_genres=["pop", "rock", "hip-hop"], limit=6)
+        tracks = recs.get("tracks", [])
+        if tracks:
             return [
                 SearchResult(
                     track_id=t["id"],
@@ -124,12 +151,14 @@ async def get_recommendations(
                 )
                 for t in tracks
             ]
-        except Exception:
-            return []
+    except Exception:
+        pass
 
+    # Last resort fallback: search for similar artist or popular tracks
     try:
-        recs = sp.recommendations(seed_tracks=seed_tracks[:5], limit=6)
-        tracks = recs.get("tracks", [])
+        query = f"artist:{current_artist}" if current_artist else "top hits 2024"
+        results = sp.search(q=query, type="track", limit=6)
+        tracks = results.get("tracks", {}).get("items", [])
         return [
             SearchResult(
                 track_id=t["id"],

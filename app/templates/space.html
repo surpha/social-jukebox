@@ -535,7 +535,15 @@
 
         try {
             const res = await fetch(`${API}/recommendations`);
-            if (!res.ok) { console.warn('Recs API error:', res.status); return; }
+            const recsSection = document.getElementById('recsSection');
+            const recsList = document.getElementById('recsList');
+
+            if (!res.ok) {
+                // Show section anyway with a retry option
+                recsSection.classList.remove('hidden');
+                recsList.innerHTML = '<p class="text-sp-light/50 text-sm text-center py-4">Could not load suggestions. <button onclick="loadRecommendations(true)" class="text-sp-green underline">Try again</button></p>';
+                return;
+            }
             const tracks = await res.json();
             const recsSection = document.getElementById('recsSection');
             const recsList = document.getElementById('recsList');
