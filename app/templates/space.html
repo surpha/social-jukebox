@@ -526,18 +526,16 @@
                 }
             }
 
-            // Update Spotify Queue section (only if changed, filter out queued tracks)
+            // Update Spotify Queue section (only if changed — server already filters queued tracks)
             const spotifyQueueSection = document.getElementById('spotifyQueueSection');
             const spotifyQueueList = document.getElementById('spotifyQueueList');
-            const queuedIds = new Set(data.queue.map(i => i.track_id));
-            if (data.up_next) queuedIds.add(data.up_next.track_id);
-            const filteredSpotifyQueue = (data.spotify_queue || []).filter(t => !queuedIds.has(t.track_id));
-            const sqFingerprint = filteredSpotifyQueue.map(t => t.track_id).join('|');
+            const spotifyTracks = data.spotify_queue || [];
+            const sqFingerprint = spotifyTracks.map(t => t.track_id).join('|');
             if (sqFingerprint !== lastSpotifyQueueFingerprint) {
                 lastSpotifyQueueFingerprint = sqFingerprint;
-                if (filteredSpotifyQueue.length > 0) {
+                if (spotifyTracks.length > 0) {
                     spotifyQueueSection.classList.remove('hidden');
-                    spotifyQueueList.innerHTML = filteredSpotifyQueue.map(t => `
+                    spotifyQueueList.innerHTML = spotifyTracks.map(t => `
                         <div class="flex items-center gap-3 p-2.5 rounded-lg hover:bg-sp-card/80 transition-colors">
                             <img src="${escHtml(t.album_art)}" alt="" class="w-10 h-10 rounded object-cover flex-shrink-0">
                             <div class="flex-1 min-w-0">
@@ -653,6 +651,9 @@
                 btn.classList.remove('bg-sp-green', 'text-sp-black');
                 btn.classList.add('bg-sp-green/20', 'text-sp-green');
                 showToast('Added to queue!');
+                // Reset fingerprints so next loadQueue shows updated lists
+                lastQueueFingerprint = '';
+                lastSpotifyQueueFingerprint = '';
                 loadQueue();
             } else if (res.status === 409) {
                 btn.innerHTML = '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>';

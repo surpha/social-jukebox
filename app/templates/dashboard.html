@@ -581,11 +581,8 @@
                 }
             }
 
-            // Spotify Queue section (filter out already-queued tracks)
-            const dashQueuedIds = new Set(data.queue.map(i => i.track_id));
-            if (data.up_next) dashQueuedIds.add(data.up_next.track_id);
-            const filteredSQ = (data.spotify_queue || []).filter(t => !dashQueuedIds.has(t.track_id));
-            renderSpotifyQueue(filteredSQ);
+            // Spotify Queue section (server already filters out queued tracks)
+            renderSpotifyQueue(data.spotify_queue || []);
 
             // Load recommendations
             loadMasterRecs();
@@ -701,6 +698,9 @@
                 btn.innerHTML = '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>';
                 btn.classList.remove('bg-sp-green', 'text-sp-black');
                 btn.classList.add('bg-sp-green/20', 'text-sp-green');
+                // Reset fingerprints so lists refresh properly
+                lastMasterQueueFp = '';
+                lastMasterSpotifyQueueFp = '';
                 loadMasterData();
             } else if (res.status === 409) {
                 btn.innerHTML = '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>';

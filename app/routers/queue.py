@@ -365,7 +365,7 @@ async def get_queue(
         try:
             spotify_queue_data = sp.queue()
             if spotify_queue_data and spotify_queue_data.get("queue"):
-                spotify_queue_raw = spotify_queue_data["queue"][:10]
+                spotify_queue_raw = spotify_queue_data["queue"][:20]
                 spotify_queue_track_ids = {t["id"] for t in spotify_queue_raw}
         except Exception:
             pass
@@ -395,15 +395,26 @@ async def get_queue(
             await db.delete(up_next_item)
             await db.commit()
 
-    # Build Spotify queue list for display (filter out now playing and up_next)
+    # Get sorted pending queue items
+    result = await db.execute(
+        select(QueueItem)
+        .where(QueueItem.space_id == space.id, QueueItem.status == "pending")
+        .order_by(QueueItem.vote_count.desc(), QueueItem.created_at.asc())
+    )
+    items = result.scalars().all()
+
+    # Build Spotify queue list for display (filter out now playing, up_next, and SJ queue tracks)
     spotify_queue_items = []
     existing_track_ids = set()
     if now_playing:
         existing_track_ids.add(now_playing.track_id)
     if up_next and up_next_item:
         existing_track_ids.add(up_next_item.track_id)
+    # Also filter out tracks already in SJ queue
+    for item in items:
+        existing_track_ids.add(item.track_id)
 
-    for t in spotify_queue_raw[:8]:
+    for t in spotify_queue_raw:
         if t["id"] not in existing_track_ids:
             spotify_queue_items.append(SearchResult(
                 track_id=t["id"],
@@ -412,12 +423,8 @@ async def get_queue(
                 album_art=t["album"]["images"][0]["url"] if t["album"]["images"] else "",
                 duration_ms=t["duration_ms"],
             ))
-
-    # Get sorted pending queue items
-    result = await db.execute(
-        select(QueueItem)
-        .where(QueueItem.space_id == space.id, QueueItem.status == "pending")
-        .order_by(QueueItem.vote_count.desc(), QueueItem.created_at.asc())
+            if len(spotify_queue_items) >= 8:
+                break
     )
     items = result.scalars().all()
 
