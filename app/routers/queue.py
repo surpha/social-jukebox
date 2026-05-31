@@ -74,86 +74,74 @@ async def get_recommendations(
     code: str,
     db: AsyncSession = Depends(get_db),
 ):
-    """Get recommendations based on a mix of current track, queue, and listening history."""
+    """Get recommendations closely related to what's currently playing and queued."""
     import random
 
     space, owner = await _get_space_with_owner(code, db)
     sp = await get_spotify_client_for_user(owner, db)
 
-    # Gather seeds from multiple sources
     seed_tracks = []
-    current_artist = None
+    seed_artists = []
 
-    # 1. Currently playing track
+    # 1. Currently playing track (primary seed)
     try:
         playback = sp.current_playback()
         if playback and playback.get("item"):
-            seed_tracks.append(playback["item"]["id"])
-            if playback["item"].get("artists"):
-                current_artist = playback["item"]["artists"][0]["name"]
+            item = playback["item"]
+            seed_tracks.append(item["id"])
+            if item.get("artists"):
+                seed_artists.append(item["artists"][0]["id"])
     except Exception:
         pass
 
-    # 2. Tracks from the queue (pending + queued)
+    # 2. Tracks from the SJ queue (secondary seeds)
     try:
         result = await db.execute(
             select(QueueItem)
             .where(QueueItem.space_id == space.id, QueueItem.status.in_(["pending", "queued"]))
             .order_by(QueueItem.vote_count.desc())
-            .limit(5)
+            .limit(3)
         )
         queue_items = result.scalars().all()
-        queue_track_ids = [item.track_id for item in queue_items]
-        seed_tracks.extend(queue_track_ids)
-        if queue_items and not current_artist:
-            current_artist = queue_items[0].artist.split(",")[0].strip()
+        seed_tracks.extend([item.track_id for item in queue_items])
     except Exception:
         pass
 
-    # 3. Recently played tracks (from queue history)
-    try:
-        result = await db.execute(
-            select(QueueItem)
-            .where(QueueItem.space_id == space.id, QueueItem.status == "played")
-            .order_by(QueueItem.created_at.desc())
-            .limit(5)
-        )
-        played_items = result.scalars().all()
-        seed_tracks.extend([item.track_id for item in played_items])
-    except Exception:
-        pass
+    # Deduplicate
+    seed_tracks = list(dict.fromkeys(seed_tracks))
+    seed_artists = list(dict.fromkeys(seed_artists))
 
-    # 4. User's top tracks as extra variety
-    if len(seed_tracks) < 3:
+    # Spotify allows max 5 total seeds (tracks + artists combined)
+    # Prioritize: current track + its artist + queue tracks
+    if seed_tracks and seed_artists:
+        # Use up to 3 track seeds + up to 2 artist seeds
+        use_tracks = seed_tracks[:3]
+        use_artists = seed_artists[:2]
+        # Ensure total <= 5
+        total = len(use_tracks) + len(use_artists)
+        if total > 5:
+            use_tracks = use_tracks[:5 - len(use_artists)]
+    elif seed_tracks:
+        use_tracks = seed_tracks[:5]
+        use_artists = []
+    else:
+        use_tracks = []
+        use_artists = []
+
+    # Try Spotify recommendations API with tight seeds
+    if use_tracks or use_artists:
         try:
-            top = sp.current_user_top_tracks(limit=3, time_range="short_term")
-            items = top.get("items", [])[:3]
-            seed_tracks.extend([t["id"] for t in items])
-            if items and not current_artist:
-                current_artist = items[0]["artists"][0]["name"] if items[0].get("artists") else None
-        except Exception:
-            pass
-
-    # Deduplicate and pick a random subset of up to 5 seeds
-    seed_tracks = list(dict.fromkeys(seed_tracks))  # preserve order, remove dupes
-    if len(seed_tracks) > 5:
-        # Always keep the current track, randomize the rest
-        current = seed_tracks[:1] if seed_tracks else []
-        rest = seed_tracks[1:]
-        random.shuffle(rest)
-        seed_tracks = current + rest[:4]
-
-    # Try Spotify recommendations API
-    if seed_tracks:
-        try:
-            recs = sp.recommendations(
-                seed_tracks=seed_tracks[:5],
-                limit=12,
-                min_popularity=random.randint(20, 50),
-            )
+            kwargs = {"limit": 15}
+            if use_tracks:
+                kwargs["seed_tracks"] = use_tracks
+            if use_artists:
+                kwargs["seed_artists"] = use_artists
+            recs = sp.recommendations(**kwargs)
             tracks = recs.get("tracks", [])
+            # Filter out tracks already in queue or currently playing
+            existing_ids = set(seed_tracks)
+            tracks = [t for t in tracks if t["id"] not in existing_ids]
             if tracks:
-                random.shuffle(tracks)
                 return [
                     SearchResult(
                         track_id=t["id"],
@@ -167,32 +155,39 @@ async def get_recommendations(
         except Exception:
             pass
 
-    # Fallback: genre-based recommendations
-    try:
-        genres = ["pop", "rock", "hip-hop", "electronic", "indie", "r-n-b"]
-        random.shuffle(genres)
-        recs = sp.recommendations(seed_genres=genres[:3], limit=10, min_popularity=random.randint(30, 60))
-        tracks = recs.get("tracks", [])
-        if tracks:
-            random.shuffle(tracks)
-            return [
-                SearchResult(
-                    track_id=t["id"],
-                    name=t["name"],
-                    artist=", ".join(a["name"] for a in t["artists"]),
-                    album_art=t["album"]["images"][0]["url"] if t["album"]["images"] else "",
-                    duration_ms=t["duration_ms"],
-                )
-                for t in tracks[:6]
-            ]
-    except Exception:
-        pass
+    # Fallback: related artists tracks
+    if seed_artists:
+        try:
+            related = sp.artist_related_artists(seed_artists[0])
+            if related.get("artists"):
+                artist_ids = [a["id"] for a in related["artists"][:3]]
+                random.shuffle(artist_ids)
+                top_tracks = sp.artist_top_tracks(artist_ids[0])
+                tracks = top_tracks.get("tracks", [])
+                existing_ids = set(seed_tracks)
+                tracks = [t for t in tracks if t["id"] not in existing_ids]
+                if tracks:
+                    return [
+                        SearchResult(
+                            track_id=t["id"],
+                            name=t["name"],
+                            artist=", ".join(a["name"] for a in t["artists"]),
+                            album_art=t["album"]["images"][0]["url"] if t["album"]["images"] else "",
+                            duration_ms=t["duration_ms"],
+                        )
+                        for t in tracks[:6]
+                    ]
+        except Exception:
+            pass
 
-    # Last resort: search for similar artist or popular tracks
+    # Last resort: search for similar artist
     try:
-        query = f"artist:{current_artist}" if current_artist else "top hits 2024"
-        offset = random.randint(0, 20)
-        results = sp.search(q=query, type="track", limit=6, offset=offset)
+        if seed_artists:
+            artist_info = sp.artist(seed_artists[0])
+            query = f"artist:{artist_info['name']}"
+        else:
+            query = "top hits 2024"
+        results = sp.search(q=query, type="track", limit=6)
         tracks = results.get("tracks", {}).get("items", [])
         return [
             SearchResult(
