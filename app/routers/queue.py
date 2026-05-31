@@ -425,8 +425,6 @@ async def get_queue(
             ))
             if len(spotify_queue_items) >= 8:
                 break
-    )
-    items = result.scalars().all()
 
     # Check which items the voter has voted for
     voted_item_ids = set()
