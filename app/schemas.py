@@ -1,30 +1,10 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel
 
 
 # --- Auth Schemas ---
-
-class SignupRequest(BaseModel):
-    email: EmailStr
-    password: str
-    name: str
-
-
-class LoginRequest(BaseModel):
-    email: EmailStr
-    password: str
-
-
-class GoogleAuthRequest(BaseModel):
-    token: str  # Google OAuth ID token
-
-
-class TokenResponse(BaseModel):
-    access_token: str
-    token_type: str = "bearer"
-
 
 class UserResponse(BaseModel):
     id: uuid.UUID
