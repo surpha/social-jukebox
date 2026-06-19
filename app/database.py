@@ -31,3 +31,12 @@ async def get_db():
 async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+
+    # Run migrations for new columns
+    async with engine.begin() as conn:
+        # Add vote_type column to votes table if not exists
+        await conn.execute(
+            __import__("sqlalchemy").text(
+                "ALTER TABLE votes ADD COLUMN IF NOT EXISTS vote_type VARCHAR(10) DEFAULT 'up'"
+            )
+        )

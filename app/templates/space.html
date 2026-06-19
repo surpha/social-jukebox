@@ -363,24 +363,18 @@
     async function doVote(trackId) {
         // Optimistic UI: toggle button state immediately
         const queueList = document.getElementById('queueList');
-        const btn = queueList.querySelector(`button[data-track="${trackId}"]`);
+        const btn = queueList.querySelector(`button[onclick*="vote('${trackId}'"]`);
         const isVoted = btn && btn.dataset.voted === 'true';
 
         if (btn) {
             if (isVoted) {
-                // Optimistic unvote
                 btn.dataset.voted = 'false';
                 btn.classList.remove('bg-sp-green/20', 'border-sp-green/50', 'text-sp-green');
                 btn.classList.add('border-white/10', 'text-sp-light', 'hover:border-sp-green/50', 'hover:text-sp-green', 'hover:bg-sp-green/10');
-                const countEl = btn.querySelector('.vote-count');
-                if (countEl) countEl.textContent = Math.max(0, parseInt(countEl.textContent) - 1);
             } else {
-                // Optimistic vote
                 btn.dataset.voted = 'true';
                 btn.classList.remove('border-white/10', 'text-sp-light', 'hover:border-sp-green/50', 'hover:text-sp-green', 'hover:bg-sp-green/10');
                 btn.classList.add('bg-sp-green/20', 'border-sp-green/50', 'text-sp-green');
-                const countEl = btn.querySelector('.vote-count');
-                if (countEl) countEl.textContent = parseInt(countEl.textContent) + 1;
             }
         }
 
@@ -394,11 +388,57 @@
             if (res.ok) {
                 const data = await res.json();
                 showToast(data.status === 'unvoted' ? 'Vote removed' : 'Vote counted!');
+                lastQueueFingerprint = '';
+                loadQueue();
             } else {
                 loadQueue();
             }
         } catch (err) {
             console.error('Vote error:', err);
+            loadQueue();
+        }
+    }
+
+    // --- Downvote (toggle) ---
+    function downvote(trackId, btn) {
+        doDownvote(trackId);
+    }
+
+    async function doDownvote(trackId) {
+        // Optimistic UI
+        const queueList = document.getElementById('queueList');
+        const btn = queueList.querySelector(`button[onclick*="downvote('${trackId}'"]`);
+        const isDownvoted = btn && btn.dataset.downvoted === 'true';
+
+        if (btn) {
+            if (isDownvoted) {
+                btn.dataset.downvoted = 'false';
+                btn.classList.remove('bg-red-500/20', 'border-red-500/50', 'text-red-400');
+                btn.classList.add('border-white/10', 'text-sp-light', 'hover:border-red-500/50', 'hover:text-red-400', 'hover:bg-red-500/10');
+            } else {
+                btn.dataset.downvoted = 'true';
+                btn.classList.remove('border-white/10', 'text-sp-light', 'hover:border-red-500/50', 'hover:text-red-400', 'hover:bg-red-500/10');
+                btn.classList.add('bg-red-500/20', 'border-red-500/50', 'text-red-400');
+            }
+        }
+
+        try {
+            const res = await fetch(`${API}/downvote`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ track_id: trackId }),
+            });
+
+            if (res.ok) {
+                const data = await res.json();
+                showToast(data.status === 'undownvoted' ? 'Downvote removed' : 'Downvoted');
+                lastQueueFingerprint = '';
+                loadQueue();
+            } else {
+                loadQueue();
+            }
+        } catch (err) {
+            console.error('Downvote error:', err);
             loadQueue();
         }
     }
@@ -491,7 +531,7 @@
             const queueList = document.getElementById('queueList');
             const queueEmpty = document.getElementById('queueEmpty');
             const queueCount = document.getElementById('queueCount');
-            const newFingerprint = data.queue.map(i => `${i.track_id}:${i.vote_count}:${i.has_voted}`).join('|');
+            const newFingerprint = data.queue.map(i => `${i.track_id}:${i.vote_count}:${i.has_voted}:${i.has_downvoted}`).join('|');
 
             if (data.queue.length === 0) {
                 if (lastQueueFingerprint !== '') {
@@ -514,13 +554,21 @@
                                 <p class="text-sm font-medium truncate">${escHtml(item.name)}</p>
                                 <p class="text-xs text-sp-light truncate">${escHtml(item.artist)}</p>
                             </div>
-                            <button onclick="vote('${item.track_id}', this)" data-track="${item.track_id}" data-voted="${item.has_voted}"
-                                class="flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-sm font-semibold transition-all flex-shrink-0 ${item.has_voted ? 'bg-sp-green/20 border-sp-green/50 text-sp-green' : 'border-white/10 text-sp-light hover:border-sp-green/50 hover:text-sp-green hover:bg-sp-green/10'}">
-                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 15l7-7 7 7"/>
-                                </svg>
-                                <span class="vote-count">${item.vote_count}</span>
-                            </button>
+                            <div class="flex items-center gap-1 flex-shrink-0">
+                                <button onclick="vote('${item.track_id}', this)" data-track="${item.track_id}" data-voted="${item.has_voted}"
+                                    class="flex items-center gap-1 px-2.5 py-1.5 rounded-full border text-sm font-semibold transition-all ${item.has_voted ? 'bg-sp-green/20 border-sp-green/50 text-sp-green' : 'border-white/10 text-sp-light hover:border-sp-green/50 hover:text-sp-green hover:bg-sp-green/10'}">
+                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 15l7-7 7 7"/>
+                                    </svg>
+                                </button>
+                                <span class="vote-count text-sm font-semibold text-sp-light min-w-[20px] text-center">${item.vote_count}</span>
+                                <button onclick="downvote('${item.track_id}', this)" data-track="${item.track_id}" data-downvoted="${item.has_downvoted}"
+                                    class="flex items-center gap-1 px-2.5 py-1.5 rounded-full border text-sm font-semibold transition-all ${item.has_downvoted ? 'bg-red-500/20 border-red-500/50 text-red-400' : 'border-white/10 text-sp-light hover:border-red-500/50 hover:text-red-400 hover:bg-red-500/10'}">
+                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 9l-7 7-7-7"/>
+                                    </svg>
+                                </button>
+                            </div>
                         </div>
                     `).join('');
                 }
