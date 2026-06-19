@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     spotify_client_id: str = ""
     spotify_client_secret: str = ""
     spotify_redirect_uri: str = "http://localhost:8000/api/spotify/callback"
+    spotify_login_redirect_uri: str = "http://localhost:8000/api/auth/spotify/callback"
 
     # JWT
     secret_key: str = "change-me-in-production"
