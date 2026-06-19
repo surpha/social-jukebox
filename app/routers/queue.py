@@ -302,15 +302,23 @@ async def vote_track(
     existing_vote = result.scalar_one_or_none()
 
     if existing_vote:
-        # Remove vote (toggle off)
-        await db.delete(existing_vote)
-        item.vote_count = max(0, item.vote_count - 1)
-        await db.commit()
-        response.set_cookie(key="voter_id", value=vid, max_age=60*60*24*30, httponly=True, samesite="lax")
-        return {"status": "unvoted", "track_id": body.track_id, "vote_count": item.vote_count}
+        if existing_vote.vote_type == "up":
+            # Remove upvote (toggle off)
+            await db.delete(existing_vote)
+            item.vote_count = max(0, item.vote_count - 1)
+            await db.commit()
+            response.set_cookie(key="voter_id", value=vid, max_age=60*60*24*30, httponly=True, samesite="lax")
+            return {"status": "unvoted", "track_id": body.track_id, "vote_count": item.vote_count}
+        else:
+            # Was a downvote, switch to upvote
+            existing_vote.vote_type = "up"
+            item.vote_count += 2  # remove -1 and add +1
+            await db.commit()
+            response.set_cookie(key="voter_id", value=vid, max_age=60*60*24*30, httponly=True, samesite="lax")
+            return {"status": "voted", "track_id": body.track_id, "vote_count": item.vote_count}
 
-    # Add vote
-    vote = Vote(queue_item_id=item.id, voter_id=vid)
+    # Add upvote
+    vote = Vote(queue_item_id=item.id, voter_id=vid, vote_type="up")
     db.add(vote)
     item.vote_count += 1
     await db.commit()
@@ -325,6 +333,70 @@ async def vote_track(
     )
 
     return {"status": "voted", "track_id": body.track_id, "vote_count": item.vote_count}
+
+
+@router.post("/downvote")
+async def downvote_track(
+    code: str,
+    body: VoteRequest,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+    voter_id: str | None = Cookie(default=None),
+):
+    """Toggle downvote on a track in the queue."""
+    space, _ = await _get_space_with_owner(code, db)
+
+    # Find the pending queue item
+    result = await db.execute(
+        select(QueueItem).where(
+            QueueItem.space_id == space.id,
+            QueueItem.track_id == body.track_id,
+            QueueItem.status == "pending",
+        )
+    )
+    item = result.scalar_one_or_none()
+    if not item:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Track not found in queue")
+
+    vid = _get_voter_id(voter_id)
+
+    # Check if already voted
+    result = await db.execute(
+        select(Vote).where(Vote.queue_item_id == item.id, Vote.voter_id == vid)
+    )
+    existing_vote = result.scalar_one_or_none()
+
+    if existing_vote:
+        if existing_vote.vote_type == "down":
+            # Remove downvote (toggle off)
+            await db.delete(existing_vote)
+            item.vote_count += 1  # undo the -1
+            await db.commit()
+            response.set_cookie(key="voter_id", value=vid, max_age=60*60*24*30, httponly=True, samesite="lax")
+            return {"status": "undownvoted", "track_id": body.track_id, "vote_count": item.vote_count}
+        else:
+            # Was an upvote, switch to downvote
+            existing_vote.vote_type = "down"
+            item.vote_count -= 2  # remove +1 and add -1
+            await db.commit()
+            response.set_cookie(key="voter_id", value=vid, max_age=60*60*24*30, httponly=True, samesite="lax")
+            return {"status": "downvoted", "track_id": body.track_id, "vote_count": item.vote_count}
+
+    # Add downvote
+    vote = Vote(queue_item_id=item.id, voter_id=vid, vote_type="down")
+    db.add(vote)
+    item.vote_count -= 1
+    await db.commit()
+
+    response.set_cookie(
+        key="voter_id",
+        value=vid,
+        max_age=60 * 60 * 24 * 30,
+        httponly=True,
+        samesite="lax",
+    )
+
+    return {"status": "downvoted", "track_id": body.track_id, "vote_count": item.vote_count}
 
 
 @router.get("/queue", response_model=QueueResponse)
@@ -426,13 +498,18 @@ async def get_queue(
             if len(spotify_queue_items) >= 8:
                 break
 
-    # Check which items the voter has voted for
+    # Check which items the voter has voted/downvoted for
     voted_item_ids = set()
+    downvoted_item_ids = set()
     if voter_id:
         vote_result = await db.execute(
-            select(Vote.queue_item_id).where(Vote.voter_id == voter_id)
+            select(Vote.queue_item_id, Vote.vote_type).where(Vote.voter_id == voter_id)
         )
-        voted_item_ids = {row[0] for row in vote_result.all()}
+        for row in vote_result.all():
+            if row[1] == "down":
+                downvoted_item_ids.add(row[0])
+            else:
+                voted_item_ids.add(row[0])
 
     queue_items = [
         QueueItemResponse(
@@ -445,6 +522,7 @@ async def get_queue(
             vote_count=item.vote_count,
             created_at=item.created_at,
             has_voted=item.id in voted_item_ids,
+            has_downvoted=item.id in downvoted_item_ids,
         )
         for item in items
     ]

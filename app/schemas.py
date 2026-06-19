@@ -59,6 +59,7 @@ class QueueItemResponse(BaseModel):
     vote_count: int
     created_at: datetime
     has_voted: bool = False
+    has_downvoted: bool = False
 
     class Config:
         from_attributes = True
