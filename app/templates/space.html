@@ -364,6 +364,7 @@
         // Optimistic UI: toggle button state immediately
         const queueList = document.getElementById('queueList');
         const btn = queueList.querySelector(`button[onclick*="vote('${trackId}'"]`);
+        const downBtn = queueList.querySelector(`button[onclick*="downvote('${trackId}'"]`);
         const isVoted = btn && btn.dataset.voted === 'true';
 
         if (btn) {
@@ -375,6 +376,12 @@
                 btn.dataset.voted = 'true';
                 btn.classList.remove('border-white/10', 'text-sp-light', 'hover:border-sp-green/50', 'hover:text-sp-green', 'hover:bg-sp-green/10');
                 btn.classList.add('bg-sp-green/20', 'border-sp-green/50', 'text-sp-green');
+                // Clear downvote if active
+                if (downBtn && downBtn.dataset.downvoted === 'true') {
+                    downBtn.dataset.downvoted = 'false';
+                    downBtn.classList.remove('bg-red-500/20', 'border-red-500/50', 'text-red-400');
+                    downBtn.classList.add('border-white/10', 'text-sp-light', 'hover:border-red-500/50', 'hover:text-red-400', 'hover:bg-red-500/10');
+                }
             }
         }
 
@@ -408,6 +415,7 @@
         // Optimistic UI
         const queueList = document.getElementById('queueList');
         const btn = queueList.querySelector(`button[onclick*="downvote('${trackId}'"]`);
+        const upBtn = queueList.querySelector(`button[onclick*="vote('${trackId}'"]`);
         const isDownvoted = btn && btn.dataset.downvoted === 'true';
 
         if (btn) {
@@ -419,6 +427,12 @@
                 btn.dataset.downvoted = 'true';
                 btn.classList.remove('border-white/10', 'text-sp-light', 'hover:border-red-500/50', 'hover:text-red-400', 'hover:bg-red-500/10');
                 btn.classList.add('bg-red-500/20', 'border-red-500/50', 'text-red-400');
+                // Clear upvote if active
+                if (upBtn && upBtn.dataset.voted === 'true') {
+                    upBtn.dataset.voted = 'false';
+                    upBtn.classList.remove('bg-sp-green/20', 'border-sp-green/50', 'text-sp-green');
+                    upBtn.classList.add('border-white/10', 'text-sp-light', 'hover:border-sp-green/50', 'hover:text-sp-green', 'hover:bg-sp-green/10');
+                }
             }
         }
 
