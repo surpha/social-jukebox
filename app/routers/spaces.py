@@ -109,9 +109,34 @@ async def deactivate_space(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Deactivate a space and stop the background worker."""
+    """Deactivate a space, stop the background worker, and clear the queue."""
+    from sqlalchemy import delete as sa_delete
+
+    from app.models import QueueItem, Vote
+
     space = await _get_owned_space(code, current_user, db)
     space.is_active = False
+
+    # Clear all pending and queued items (and their votes) for this space
+    # First get the queue item IDs to delete their votes
+    result = await db.execute(
+        select(QueueItem.id).where(
+            QueueItem.space_id == space.id,
+            QueueItem.status.in_(["pending", "queued"]),
+        )
+    )
+    queue_item_ids = [row[0] for row in result.all()]
+
+    if queue_item_ids:
+        # Delete votes for those queue items
+        await db.execute(
+            sa_delete(Vote).where(Vote.queue_item_id.in_(queue_item_ids))
+        )
+        # Delete the queue items
+        await db.execute(
+            sa_delete(QueueItem).where(QueueItem.id.in_(queue_item_ids))
+        )
+
     await db.commit()
 
     from app.worker import worker_manager
