@@ -64,11 +64,27 @@ class WorkerManager:
     async def _poll_loop(self, space_id: uuid.UUID, user_id: uuid.UUID):
         """Main polling loop for a space. Checks playback every 5 seconds."""
         logger.info(f"Poll loop started for space {space_id}")
+        # Clear any leftover on-deck rows from a previous run so a fresh worker
+        # starts with an empty slot and re-locks the current top-voted track.
+        try:
+            async with async_session() as db:
+                stale = await db.execute(
+                    select(QueueItem).where(
+                        QueueItem.space_id == space_id, QueueItem.status == "queued"
+                    )
+                )
+                for qi in stale.scalars().all():
+                    qi.status = "played"
+                await db.commit()
+        except Exception as e:
+            logger.warning(f"Failed to clear stale on-deck for space {space_id}: {e}")
+
         # Per-space on-deck tracking. `on_deck_id` is the single locked "next" track;
         # `seen` flips once Spotify's queue snapshot confirms it (handles eventual
         # consistency); `misses` counts reliable snapshots that omit it after it was
-        # seen, so a real manual skip is detected without flapping on stale reads.
-        state = {"on_deck_id": None, "seen": False, "misses": 0}
+        # seen (real skip); `unseen` counts reliable snapshots before it ever appeared
+        # (a stale row that never propagated), so the slot can never get stuck.
+        state = {"on_deck_id": None, "seen": False, "misses": 0, "unseen": 0}
 
         while True:
             try:
@@ -85,6 +101,7 @@ class WorkerManager:
         state["on_deck_id"] = None
         state["seen"] = False
         state["misses"] = 0
+        state["unseen"] = 0
 
     async def _check_and_queue(
         self, space_id: uuid.UUID, user_id: uuid.UUID, state: dict,
@@ -130,7 +147,6 @@ class WorkerManager:
                 return
 
             current_track_id = playback["item"]["id"]
-            device_id = (playback.get("device") or {}).get("id")
 
             # Read Spotify's upcoming queue once (eventually-consistent; may be empty).
             upcoming_ids: set[str] = set()
@@ -163,20 +179,28 @@ class WorkerManager:
                     state["on_deck_id"] = qi.track_id
                     state["seen"] = qi.track_id in upcoming_ids
                     state["misses"] = 0
+                    state["unseen"] = 0
                 elif qi.track_id in upcoming_ids:
                     state["seen"] = True
                     state["misses"] = 0
-                elif spotify_queue_known and state["seen"]:
-                    # It propagated earlier but a reliable snapshot now omits it.
-                    state["misses"] += 1
+                elif spotify_queue_known:
+                    # Reliable snapshot omits it: a post-seen miss (skip) or, if it
+                    # never propagated, an unseen strike (stale/leftover row).
+                    if state["seen"]:
+                        state["misses"] += 1
+                    else:
+                        state["unseen"] += 1
 
-                # Only release on a *confirmed* skip: seen before, then reliably gone
-                # for two consecutive polls (~10s). Never release on a single read.
-                if state["seen"] and state["misses"] >= 2:
+                # Release the slot on a *confirmed* skip (seen, then reliably gone for
+                # two polls) or a stale row that never appeared after several reliable
+                # snapshots (~30s) — so a leftover 'queued' row can never block queueing.
+                if (state["seen"] and state["misses"] >= 2) or (
+                    not state["seen"] and state["unseen"] >= 6
+                ):
                     qi.status = "played"
                     self._reset_on_deck(state)
                     logger.info(
-                        f"On-deck '{qi.name}' looks skipped in space {space_id}; freeing slot"
+                        f"Freeing stuck/skipped on-deck '{qi.name}' in space {space_id}"
                     )
                     continue
 
@@ -200,16 +224,16 @@ class WorkerManager:
                         state["on_deck_id"] = top_item.track_id
                         state["seen"] = True
                         state["misses"] = 0
+                        state["unseen"] = 0
                         await db.commit()
                     else:
                         try:
-                            sp.add_to_queue(
-                                f"spotify:track:{top_item.track_id}", device_id=device_id
-                            )
+                            sp.add_to_queue(f"spotify:track:{top_item.track_id}")
                             top_item.status = "queued"
                             state["on_deck_id"] = top_item.track_id
                             state["seen"] = False
                             state["misses"] = 0
+                            state["unseen"] = 0
                             await db.commit()
                             logger.info(
                                 f"Locked '{top_item.name}' by {top_item.artist} "
