@@ -442,30 +442,47 @@ async def get_queue(
         except Exception:
             pass
 
-    # Get the "up next" track - only show truly "queued" (locked-in) items
-    # Verify the item is still in Spotify's queue (not already played/skipped)
+    # Get the "up next" track - the locked-in "queued" item(s).
+    # Spotify's queue() is eventually-consistent and often returns an empty/partial
+    # snapshot, so only treat a track as skipped when we have a reliable (non-empty)
+    # snapshot that genuinely omits it. Otherwise keep showing it to avoid flapping.
     up_next = None
-    up_next_result = await db.execute(
+    up_next_item = None
+    queued_result = await db.execute(
         select(QueueItem)
         .where(QueueItem.space_id == space.id, QueueItem.status == "queued")
-        .limit(1)
+        .order_by(QueueItem.created_at.desc())
     )
-    up_next_item = up_next_result.scalar_one_or_none()
-    if up_next_item:
-        if up_next_item.track_id in spotify_queue_track_ids:
-            # Still in Spotify's queue — show it
-            up_next = UpNextResponse(
-                track_id=up_next_item.track_id,
-                name=up_next_item.name,
-                artist=up_next_item.artist,
-                album_art=up_next_item.album_art,
-                duration_ms=up_next_item.duration_ms,
-                vote_count=up_next_item.vote_count,
-            )
+    queued_items = queued_result.scalars().all()
+    spotify_queue_known = len(spotify_queue_track_ids) > 0
+    stale_items = []
+    for qi in queued_items:
+        is_now_playing = now_playing is not None and qi.track_id == now_playing.track_id
+        if is_now_playing:
+            # Just started playing; the worker marks it 'played' on the next track change.
+            continue
+        if qi.track_id in spotify_queue_track_ids or not spotify_queue_known:
+            # Still queued upstream, or we couldn't reliably read Spotify's queue.
+            if up_next_item is None:
+                up_next_item = qi
         else:
-            # Already played or skipped — remove the stale entry
-            await db.delete(up_next_item)
-            await db.commit()
+            stale_items.append(qi)
+
+    # Only prune when we have a trustworthy (non-empty) Spotify snapshot.
+    if spotify_queue_known and stale_items:
+        for qi in stale_items:
+            await db.delete(qi)
+        await db.commit()
+
+    if up_next_item:
+        up_next = UpNextResponse(
+            track_id=up_next_item.track_id,
+            name=up_next_item.name,
+            artist=up_next_item.artist,
+            album_art=up_next_item.album_art,
+            duration_ms=up_next_item.duration_ms,
+            vote_count=up_next_item.vote_count,
+        )
 
     # Get sorted pending queue items
     result = await db.execute(

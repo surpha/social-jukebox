@@ -65,13 +65,12 @@ class WorkerManager:
         """Main polling loop for a space. Checks playback every 5 seconds."""
         logger.info(f"Poll loop started for space {space_id}")
         last_known_track_id: str | None = None
-        has_queued_for_current: bool = False
 
         while True:
             try:
                 await asyncio.sleep(5)
-                last_known_track_id, has_queued_for_current = await self._check_and_queue(
-                    space_id, user_id, last_known_track_id, has_queued_for_current
+                last_known_track_id = await self._check_and_queue(
+                    space_id, user_id, last_known_track_id
                 )
             except asyncio.CancelledError:
                 break
@@ -81,20 +80,20 @@ class WorkerManager:
 
     async def _check_and_queue(
         self, space_id: uuid.UUID, user_id: uuid.UUID,
-        last_known_track_id: str | None, has_queued_for_current: bool
-    ) -> tuple[str | None, bool]:
-        """Check current playback and queue next track when song changes."""
+        last_known_track_id: str | None,
+    ) -> str | None:
+        """Keep exactly one top-voted track on deck in Spotify, idempotently."""
         async with async_session() as db:
             # Get user with fresh tokens
             result = await db.execute(select(User).where(User.id == user_id))
             user = result.scalar_one_or_none()
             if not user or not user.spotify_refresh_token:
-                return last_known_track_id, has_queued_for_current
+                return last_known_track_id
 
             # Get Spotify client
             sp = get_spotify_client(user)
             if not sp:
-                return last_known_track_id, has_queued_for_current
+                return last_known_track_id
 
             # Persist refreshed token if needed
             if hasattr(user, "_refreshed_token"):
@@ -112,33 +111,43 @@ class WorkerManager:
                 playback = sp.current_playback()
             except Exception as e:
                 logger.warning(f"Failed to get playback for space {space_id}: {e}")
-                return last_known_track_id, has_queued_for_current
+                return last_known_track_id
 
             if not playback or not playback.get("item"):
-                return last_known_track_id, has_queued_for_current
+                return last_known_track_id
 
             current_track_id = playback["item"]["id"]
 
-            # Detect track change: new song started playing
-            track_changed = (last_known_track_id is not None and current_track_id != last_known_track_id)
+            # Read Spotify's upcoming queue once (eventually-consistent; may be empty).
+            upcoming_ids: set[str] = set()
+            try:
+                q = sp.queue()
+                if q and q.get("queue"):
+                    upcoming_ids = {t["id"] for t in q["queue"] if t.get("id")}
+            except Exception:
+                pass
+            spotify_queue_known = len(upcoming_ids) > 0
 
-            if track_changed:
-                # Mark any queued tracks that match the new current track as 'played'
-                queued_result = await db.execute(
-                    select(QueueItem)
-                    .where(QueueItem.space_id == space_id, QueueItem.status == "queued")
-                )
-                for queued_item in queued_result.scalars().all():
-                    if queued_item.track_id == current_track_id:
-                        queued_item.status = "played"
-                await db.commit()
+            # Reconcile existing on-deck ("queued") items and decide if a slot is free.
+            queued_result = await db.execute(
+                select(QueueItem)
+                .where(QueueItem.space_id == space_id, QueueItem.status == "queued")
+            )
+            has_on_deck = False
+            for qi in queued_result.scalars().all():
+                if qi.track_id == current_track_id:
+                    # It's now playing — done with it.
+                    qi.status = "played"
+                elif spotify_queue_known and qi.track_id not in upcoming_ids:
+                    # Reliably gone from Spotify's queue and not playing — it was skipped.
+                    qi.status = "played"
+                else:
+                    # Still lined up (or we couldn't read the queue) — keep it on deck.
+                    has_on_deck = True
+            await db.commit()
 
-                # Reset flag: we haven't queued for this new track yet
-                has_queued_for_current = False
-
-            # Queue next track if we haven't already for the current song
-            if not has_queued_for_current:
-                # Get top-voted pending track
+            # Only promote a new track when nothing is on deck (prevents duplicates).
+            if not has_on_deck:
                 result = await db.execute(
                     select(QueueItem)
                     .where(QueueItem.space_id == space_id, QueueItem.status == "pending")
@@ -147,21 +156,24 @@ class WorkerManager:
                 )
                 top_item = result.scalar_one_or_none()
 
-                if top_item:
-                    # Push to Spotify queue
-                    try:
-                        sp.add_to_queue(f"spotify:track:{top_item.track_id}")
+                if top_item and top_item.track_id != current_track_id:
+                    if top_item.track_id in upcoming_ids:
+                        # Already in Spotify's queue — record it, don't add a duplicate.
                         top_item.status = "queued"
                         await db.commit()
-                        has_queued_for_current = True
-                        logger.info(
-                            f"Queued '{top_item.name}' by {top_item.artist} "
-                            f"(votes: {top_item.vote_count}) in space {space_id}"
-                        )
-                    except Exception as e:
-                        logger.error(f"Failed to add to Spotify queue: {e}")
+                    else:
+                        try:
+                            sp.add_to_queue(f"spotify:track:{top_item.track_id}")
+                            top_item.status = "queued"
+                            await db.commit()
+                            logger.info(
+                                f"Queued '{top_item.name}' by {top_item.artist} "
+                                f"(votes: {top_item.vote_count}) in space {space_id}"
+                            )
+                        except Exception as e:
+                            logger.error(f"Failed to add to Spotify queue: {e}")
 
-            return current_track_id, has_queued_for_current
+            return current_track_id
 
 
 # Global singleton
