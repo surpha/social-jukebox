@@ -12,6 +12,10 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   `HARNESS.md`, `.github/copilot-instructions.md`, and this `CHANGELOG.md`.
 - `GET /health` liveness endpoint (no DB hit) for uptime pings to keep the Render free tier awake.
 
+### Changed
+- Owner dashboard "master view" now shows the downvote button alongside upvote (parity with the
+  guest page), with mutual up/down clearing. Uses the existing `has_downvoted` queue data.
+
 ### Notes
 - Baseline captured at branch `feature/persistent-spaces-dj`. Prior history (Spotify-only auth,
   downvotes, clear-queue-on-deactivate, persistent spaces/DJ) predates this changelog.

@@ -563,7 +563,7 @@
             }
 
             // Queue list (only rebuild if changed)
-            const queueFp = data.queue.map(i => `${i.track_id}:${i.vote_count}:${i.has_voted}`).join('|');
+            const queueFp = data.queue.map(i => `${i.track_id}:${i.vote_count}:${i.has_voted}:${i.has_downvoted}`).join('|');
             if (queueFp !== lastMasterQueueFp) {
                 lastMasterQueueFp = queueFp;
                 if (data.queue.length === 0) {
@@ -581,11 +581,17 @@
                                 <p class="text-sm font-medium truncate">${escHtml(item.name)}</p>
                                 <p class="text-xs text-sp-light truncate">${escHtml(item.artist)}</p>
                             </div>
-                            <button onclick="masterVote('${item.track_id}', this)" data-track="${item.track_id}" data-voted="${item.has_voted}"
-                                class="flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-sm font-semibold transition-all flex-shrink-0 ${item.has_voted ? 'bg-sp-green/20 border-sp-green/50 text-sp-green' : 'border-white/10 text-sp-light hover:border-sp-green/50 hover:text-sp-green hover:bg-sp-green/10'}">
-                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 15l7-7 7 7"/></svg>
-                                <span>${item.vote_count}</span>
-                            </button>
+                            <div class="flex items-center gap-1 flex-shrink-0">
+                                <button onclick="masterVote('${item.track_id}', this)" data-track="${item.track_id}" data-voted="${item.has_voted}"
+                                    class="flex items-center gap-1 px-2.5 py-1.5 rounded-full border text-sm font-semibold transition-all ${item.has_voted ? 'bg-sp-green/20 border-sp-green/50 text-sp-green' : 'border-white/10 text-sp-light hover:border-sp-green/50 hover:text-sp-green hover:bg-sp-green/10'}">
+                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 15l7-7 7 7"/></svg>
+                                </button>
+                                <span class="vote-count text-sm font-semibold text-sp-light min-w-[20px] text-center">${item.vote_count}</span>
+                                <button onclick="masterDownvote('${item.track_id}', this)" data-track="${item.track_id}" data-downvoted="${item.has_downvoted}"
+                                    class="flex items-center gap-1 px-2.5 py-1.5 rounded-full border text-sm font-semibold transition-all ${item.has_downvoted ? 'bg-red-500/20 border-red-500/50 text-red-400' : 'border-white/10 text-sp-light hover:border-red-500/50 hover:text-red-400 hover:bg-red-500/10'}">
+                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 9l-7 7-7-7"/></svg>
+                                </button>
+                            </div>
                         </div>
                     `).join('');
                 }
@@ -636,20 +642,27 @@
     }
 
     async function masterVote(trackId, btn) {
-        const isVoted = btn.dataset.voted === 'true';
+        const queueList = document.getElementById('masterQueueList');
+        const upBtn = queueList.querySelector(`button[onclick*="masterVote('${trackId}'"]`);
+        const downBtn = queueList.querySelector(`button[onclick*="masterDownvote('${trackId}'"]`);
+        const isVoted = upBtn && upBtn.dataset.voted === 'true';
 
-        if (isVoted) {
-            btn.dataset.voted = 'false';
-            btn.classList.remove('bg-sp-green/20', 'border-sp-green/50', 'text-sp-green');
-            btn.classList.add('border-white/10', 'text-sp-light', 'hover:border-sp-green/50', 'hover:text-sp-green', 'hover:bg-sp-green/10');
-            const countEl = btn.querySelector('span');
-            if (countEl) countEl.textContent = Math.max(0, parseInt(countEl.textContent) - 1);
-        } else {
-            btn.dataset.voted = 'true';
-            btn.classList.remove('border-white/10', 'text-sp-light', 'hover:border-sp-green/50', 'hover:text-sp-green', 'hover:bg-sp-green/10');
-            btn.classList.add('bg-sp-green/20', 'border-sp-green/50', 'text-sp-green');
-            const countEl = btn.querySelector('span');
-            if (countEl) countEl.textContent = parseInt(countEl.textContent) + 1;
+        if (upBtn) {
+            if (isVoted) {
+                upBtn.dataset.voted = 'false';
+                upBtn.classList.remove('bg-sp-green/20', 'border-sp-green/50', 'text-sp-green');
+                upBtn.classList.add('border-white/10', 'text-sp-light', 'hover:border-sp-green/50', 'hover:text-sp-green', 'hover:bg-sp-green/10');
+            } else {
+                upBtn.dataset.voted = 'true';
+                upBtn.classList.remove('border-white/10', 'text-sp-light', 'hover:border-sp-green/50', 'hover:text-sp-green', 'hover:bg-sp-green/10');
+                upBtn.classList.add('bg-sp-green/20', 'border-sp-green/50', 'text-sp-green');
+                // Clear downvote if active
+                if (downBtn && downBtn.dataset.downvoted === 'true') {
+                    downBtn.dataset.downvoted = 'false';
+                    downBtn.classList.remove('bg-red-500/20', 'border-red-500/50', 'text-red-400');
+                    downBtn.classList.add('border-white/10', 'text-sp-light', 'hover:border-red-500/50', 'hover:text-red-400', 'hover:bg-red-500/10');
+                }
+            }
         }
 
         try {
@@ -658,11 +671,48 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ track_id: trackId }),
             });
-            if (!res.ok) {
-                loadMasterData();
-            }
+            lastMasterQueueFp = '';
+            loadMasterData();
         } catch (err) {
             console.error('Vote error:', err);
+            loadMasterData();
+        }
+    }
+
+    async function masterDownvote(trackId, btn) {
+        const queueList = document.getElementById('masterQueueList');
+        const downBtn = queueList.querySelector(`button[onclick*="masterDownvote('${trackId}'"]`);
+        const upBtn = queueList.querySelector(`button[onclick*="masterVote('${trackId}'"]`);
+        const isDownvoted = downBtn && downBtn.dataset.downvoted === 'true';
+
+        if (downBtn) {
+            if (isDownvoted) {
+                downBtn.dataset.downvoted = 'false';
+                downBtn.classList.remove('bg-red-500/20', 'border-red-500/50', 'text-red-400');
+                downBtn.classList.add('border-white/10', 'text-sp-light', 'hover:border-red-500/50', 'hover:text-red-400', 'hover:bg-red-500/10');
+            } else {
+                downBtn.dataset.downvoted = 'true';
+                downBtn.classList.remove('border-white/10', 'text-sp-light', 'hover:border-red-500/50', 'hover:text-red-400', 'hover:bg-red-500/10');
+                downBtn.classList.add('bg-red-500/20', 'border-red-500/50', 'text-red-400');
+                // Clear upvote if active
+                if (upBtn && upBtn.dataset.voted === 'true') {
+                    upBtn.dataset.voted = 'false';
+                    upBtn.classList.remove('bg-sp-green/20', 'border-sp-green/50', 'text-sp-green');
+                    upBtn.classList.add('border-white/10', 'text-sp-light', 'hover:border-sp-green/50', 'hover:text-sp-green', 'hover:bg-sp-green/10');
+                }
+            }
+        }
+
+        try {
+            const res = await fetch(`/api/spaces/${masterSpaceCode}/downvote`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ track_id: trackId }),
+            });
+            lastMasterQueueFp = '';
+            loadMasterData();
+        } catch (err) {
+            console.error('Downvote error:', err);
             loadMasterData();
         }
     }
