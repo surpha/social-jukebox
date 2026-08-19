@@ -56,7 +56,8 @@ app.include_router(spaces.router)
 app.include_router(queue.router)
 
 
-@app.get("/health", tags=["health"])
+# GET + HEAD so uptime monitors (which often default to HEAD) don't get a 405.
+@app.api_route("/health", methods=["GET", "HEAD"], tags=["health"])
 async def health():
     """Liveness probe for uptime pings (keeps the Render free tier awake). No DB hit."""
     return {"status": "ok"}
