@@ -64,36 +64,49 @@ class WorkerManager:
     async def _poll_loop(self, space_id: uuid.UUID, user_id: uuid.UUID):
         """Main polling loop for a space. Checks playback every 5 seconds."""
         logger.info(f"Poll loop started for space {space_id}")
-        last_known_track_id: str | None = None
+        # Per-space on-deck tracking. `on_deck_id` is the single locked "next" track;
+        # `seen` flips once Spotify's queue snapshot confirms it (handles eventual
+        # consistency); `misses` counts reliable snapshots that omit it after it was
+        # seen, so a real manual skip is detected without flapping on stale reads.
+        state = {"on_deck_id": None, "seen": False, "misses": 0}
 
         while True:
             try:
                 await asyncio.sleep(5)
-                last_known_track_id = await self._check_and_queue(
-                    space_id, user_id, last_known_track_id
-                )
+                await self._check_and_queue(space_id, user_id, state)
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 logger.error(f"Worker error for space {space_id}: {e}")
                 await asyncio.sleep(10)  # Back off on error
 
+    @staticmethod
+    def _reset_on_deck(state: dict) -> None:
+        state["on_deck_id"] = None
+        state["seen"] = False
+        state["misses"] = 0
+
     async def _check_and_queue(
-        self, space_id: uuid.UUID, user_id: uuid.UUID,
-        last_known_track_id: str | None,
-    ) -> str | None:
-        """Keep exactly one top-voted track on deck in Spotify, idempotently."""
+        self, space_id: uuid.UUID, user_id: uuid.UUID, state: dict,
+    ) -> None:
+        """Keep exactly one top-voted track locked in Spotify as the next song.
+
+        Invariant: at most one 'queued' track on deck at a time. The slot is freed
+        only when that track actually starts playing (advance) or is confirmed gone
+        across multiple reliable snapshots (manual skip) — never on a single stale
+        Spotify queue read, which would otherwise double-queue or flap.
+        """
         async with async_session() as db:
             # Get user with fresh tokens
             result = await db.execute(select(User).where(User.id == user_id))
             user = result.scalar_one_or_none()
             if not user or not user.spotify_refresh_token:
-                return last_known_track_id
+                return
 
             # Get Spotify client
             sp = get_spotify_client(user)
             if not sp:
-                return last_known_track_id
+                return
 
             # Persist refreshed token if needed
             if hasattr(user, "_refreshed_token"):
@@ -111,12 +124,13 @@ class WorkerManager:
                 playback = sp.current_playback()
             except Exception as e:
                 logger.warning(f"Failed to get playback for space {space_id}: {e}")
-                return last_known_track_id
+                return
 
             if not playback or not playback.get("item"):
-                return last_known_track_id
+                return
 
             current_track_id = playback["item"]["id"]
+            device_id = (playback.get("device") or {}).get("id")
 
             # Read Spotify's upcoming queue once (eventually-consistent; may be empty).
             upcoming_ids: set[str] = set()
@@ -128,25 +142,48 @@ class WorkerManager:
                 pass
             spotify_queue_known = len(upcoming_ids) > 0
 
-            # Reconcile existing on-deck ("queued") items and decide if a slot is free.
+            # Reconcile the on-deck ("queued") item(s) and decide if the slot is free.
             queued_result = await db.execute(
                 select(QueueItem)
                 .where(QueueItem.space_id == space_id, QueueItem.status == "queued")
+                .order_by(QueueItem.created_at.desc())
             )
             has_on_deck = False
             for qi in queued_result.scalars().all():
                 if qi.track_id == current_track_id:
-                    # It's now playing — done with it.
+                    # It advanced to playing — free the slot so the next song locks in.
                     qi.status = "played"
-                elif spotify_queue_known and qi.track_id not in upcoming_ids:
-                    # Reliably gone from Spotify's queue and not playing — it was skipped.
+                    if state["on_deck_id"] == qi.track_id:
+                        self._reset_on_deck(state)
+                    continue
+
+                # Still ahead of playback — this is (or becomes) our locked next song.
+                if state["on_deck_id"] != qi.track_id:
+                    # Fresh worker/restart or a newly locked track: adopt it.
+                    state["on_deck_id"] = qi.track_id
+                    state["seen"] = qi.track_id in upcoming_ids
+                    state["misses"] = 0
+                elif qi.track_id in upcoming_ids:
+                    state["seen"] = True
+                    state["misses"] = 0
+                elif spotify_queue_known and state["seen"]:
+                    # It propagated earlier but a reliable snapshot now omits it.
+                    state["misses"] += 1
+
+                # Only release on a *confirmed* skip: seen before, then reliably gone
+                # for two consecutive polls (~10s). Never release on a single read.
+                if state["seen"] and state["misses"] >= 2:
                     qi.status = "played"
-                else:
-                    # Still lined up (or we couldn't read the queue) — keep it on deck.
-                    has_on_deck = True
+                    self._reset_on_deck(state)
+                    logger.info(
+                        f"On-deck '{qi.name}' looks skipped in space {space_id}; freeing slot"
+                    )
+                    continue
+
+                has_on_deck = True
             await db.commit()
 
-            # Only promote a new track when nothing is on deck (prevents duplicates).
+            # Slot is free → lock in the current top-voted pending track.
             if not has_on_deck:
                 result = await db.execute(
                     select(QueueItem)
@@ -160,20 +197,30 @@ class WorkerManager:
                     if top_item.track_id in upcoming_ids:
                         # Already in Spotify's queue — record it, don't add a duplicate.
                         top_item.status = "queued"
+                        state["on_deck_id"] = top_item.track_id
+                        state["seen"] = True
+                        state["misses"] = 0
                         await db.commit()
                     else:
                         try:
-                            sp.add_to_queue(f"spotify:track:{top_item.track_id}")
+                            sp.add_to_queue(
+                                f"spotify:track:{top_item.track_id}", device_id=device_id
+                            )
                             top_item.status = "queued"
+                            state["on_deck_id"] = top_item.track_id
+                            state["seen"] = False
+                            state["misses"] = 0
                             await db.commit()
                             logger.info(
-                                f"Queued '{top_item.name}' by {top_item.artist} "
-                                f"(votes: {top_item.vote_count}) in space {space_id}"
+                                f"Locked '{top_item.name}' by {top_item.artist} "
+                                f"(votes: {top_item.vote_count}) as next in space {space_id}"
                             )
                         except Exception as e:
-                            logger.error(f"Failed to add to Spotify queue: {e}")
-
-            return current_track_id
+                            # 403 'Restriction violated' here means the host's device/context
+                            # won't accept queue commands (idle device, ad, non-Premium).
+                            logger.error(
+                                f"Failed to add to Spotify queue in space {space_id}: {e}"
+                            )
 
 
 # Global singleton

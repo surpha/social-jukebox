@@ -442,10 +442,10 @@ async def get_queue(
         except Exception:
             pass
 
-    # Get the "up next" track - the locked-in "queued" item(s).
-    # Spotify's queue() is eventually-consistent and often returns an empty/partial
-    # snapshot, so only treat a track as skipped when we have a reliable (non-empty)
-    # snapshot that genuinely omits it. Otherwise keep showing it to avoid flapping.
+    # Get the "up next" track - the single locked-in "queued" item.
+    # The worker owns the on-deck lifecycle (locking, advancing, releasing), so this
+    # path is read-only: it just displays the locked track and never deletes it. The
+    # now-playing track is excluded (the worker marks it 'played' on the next poll).
     up_next = None
     up_next_item = None
     queued_result = await db.execute(
@@ -453,26 +453,11 @@ async def get_queue(
         .where(QueueItem.space_id == space.id, QueueItem.status == "queued")
         .order_by(QueueItem.created_at.desc())
     )
-    queued_items = queued_result.scalars().all()
-    spotify_queue_known = len(spotify_queue_track_ids) > 0
-    stale_items = []
-    for qi in queued_items:
-        is_now_playing = now_playing is not None and qi.track_id == now_playing.track_id
-        if is_now_playing:
-            # Just started playing; the worker marks it 'played' on the next track change.
+    for qi in queued_result.scalars().all():
+        if now_playing is not None and qi.track_id == now_playing.track_id:
             continue
-        if qi.track_id in spotify_queue_track_ids or not spotify_queue_known:
-            # Still queued upstream, or we couldn't reliably read Spotify's queue.
-            if up_next_item is None:
-                up_next_item = qi
-        else:
-            stale_items.append(qi)
-
-    # Only prune when we have a trustworthy (non-empty) Spotify snapshot.
-    if spotify_queue_known and stale_items:
-        for qi in stale_items:
-            await db.delete(qi)
-        await db.commit()
+        up_next_item = qi
+        break
 
     if up_next_item:
         up_next = UpNextResponse(

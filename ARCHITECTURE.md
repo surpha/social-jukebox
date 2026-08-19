@@ -162,15 +162,18 @@ The **active DJ (or owner fallback)** provides the Spotify credentials used for 
 ### 6.5 Background worker
 `WorkerManager` (singleton in `worker.py`) keeps a `dict[space_id -> asyncio.Task]`.
 - On startup, `restart_active_workers()` relaunches a loop for every active space.
+- Invariant: **exactly one** top-voted track is locked in Spotify as the next song at a time.
+  Everything below the locked track (N+2 onward) stays votable/re-orderable; only N+1 is committed.
 - Each `_poll_loop` sleeps 5s, then `_check_and_queue`:
   1. Loads the DJ user + fresh Spotify client (refreshing/persisting tokens if expired).
   2. Reads `current_playback()` and Spotify's upcoming `queue()` (eventually-consistent; may be empty).
-  3. Reconciles `queued` items: marks the one now playing as `played`; marks any that are
-     reliably absent from Spotify's (non-empty) queue as `played` (skipped). Others stay on deck.
-  4. **Only when no `queued` (on-deck) item remains**, promotes the top-voted `pending` item —
-     but skips the add if it's already in Spotify's queue (idempotent), then flips it to `queued`.
-- Gating on DB state (one on-deck track at a time) rather than a loop-local flag makes queueing
-  resilient to playback flapping, restarts, and flaky `queue()` reads (prevents duplicate adds).
+  3. Reconciles the on-deck (`queued`) item, freeing the slot only when it **actually starts
+     playing** (advances) or is **confirmed gone across two reliable polls** (a real manual skip).
+     It never releases on a single stale snapshot — that previously caused double-queues/flapping.
+  4. When the slot is free, locks the top-voted `pending` item: skips the add if it's already in
+     Spotify's queue (idempotent), targets the active `device_id`, then flips it to `queued`.
+- Per-space loop state (`on_deck_id`, `seen`, `misses`) tracks queue-snapshot propagation so the
+  eventually-consistent `queue()` API can't trigger premature releases.
 
 ## 7. Spotify token handling
 - Tokens are Fernet-encrypted at rest. The Fernet key is `base64(sha256(SECRET_KEY))` — **rotating `SECRET_KEY` invalidates all stored Spotify tokens.**

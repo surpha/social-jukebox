@@ -17,6 +17,13 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   guest page), with mutual up/down clearing. Uses the existing `has_downvoted` queue data.
 
 ### Fixed
+- On-deck locking is now reliable. The worker keeps exactly one top-voted track locked in Spotify
+  as the next song and only frees that slot when the track actually starts playing or is confirmed
+  gone across two reliable polls. Previously it released the slot on a single eventually-consistent
+  `queue()` snapshot, which — when Spotify autoplay made the snapshot non-empty before a just-added
+  track had propagated — wrongly marked the locked song skipped and queued a second one (double-
+  queue/desync). `GET /queue` is now read-only for the on-deck item (the worker owns its lifecycle)
+  and no longer deletes queued rows on a stale snapshot.
 - "Up next" no longer flaps/switches constantly. `GET /queue` previously deleted the queued item
   whenever Spotify's eventually-consistent `queue()` snapshot momentarily omitted it, causing the
   worker to re-queue a different track each poll. It is now non-destructive: it only prunes a
