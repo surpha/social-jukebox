@@ -10,6 +10,7 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 ### Added
 - Agent & architecture documentation: `ARCHITECTURE.md`, `AGENTS.md`, `CLAUDE.md`,
   `HARNESS.md`, `.github/copilot-instructions.md`, and this `CHANGELOG.md`.
+- `GET /health` liveness endpoint (no DB hit) for uptime pings to keep the Render free tier awake.
 
 ### Notes
 - Baseline captured at branch `feature/persistent-spaces-dj`. Prior history (Spotify-only auth,

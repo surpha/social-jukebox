@@ -131,6 +131,10 @@ social-jukebox/
 - `POST /api/spaces/{code}/vote` — Upvote a track
 - `GET /api/spaces/{code}/queue` — Get now playing + queue
 
+### Health
+- `GET /health` — Liveness probe (returns `{"status": "ok"}`). Ping it every ~10 min to keep the
+  Render free tier from sleeping.
+
 ## License
 
 MIT
