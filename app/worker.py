@@ -144,6 +144,10 @@ class WorkerManager:
                 return
 
             if not playback or not playback.get("item"):
+                logger.info(
+                    f"[queue] space={space_id}: no active playback/device — "
+                    f"host must be playing on an active Spotify device to queue"
+                )
                 return
 
             current_track_id = playback["item"]["id"]
@@ -245,6 +249,16 @@ class WorkerManager:
                             logger.error(
                                 f"Failed to add to Spotify queue in space {space_id}: {e}"
                             )
+                elif top_item is None:
+                    logger.info(
+                        f"[queue] space={space_id}: slot free but no pending votes to queue"
+                    )
+            else:
+                logger.info(
+                    f"[queue] space={space_id}: on-deck '{state['on_deck_id']}' still "
+                    f"locked (seen={state['seen']}, misses={state['misses']}, "
+                    f"unseen={state['unseen']}); not adding another"
+                )
 
 
 # Global singleton
