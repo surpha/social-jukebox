@@ -130,11 +130,13 @@ class WorkerManager:
             result = await db.execute(select(User).where(User.id == user_id))
             user = result.scalar_one_or_none()
             if not user or not user.spotify_refresh_token:
+                logger.info(f"[worker] space={space_id}: no user/refresh token; skipping")
                 return
 
             # Get Spotify client
             sp = get_spotify_client(user)
             if not sp:
+                logger.info(f"[worker] space={space_id}: no Spotify client; skipping")
                 return
 
             # Persist refreshed token if needed
@@ -156,6 +158,10 @@ class WorkerManager:
                 return
 
             if not playback or not playback.get("item"):
+                logger.info(
+                    f"[worker] space={space_id}: no active playback — host must be "
+                    f"playing on an active Spotify device (playback={bool(playback)})"
+                )
                 return
 
             current_track_id = playback["item"]["id"]
@@ -231,6 +237,12 @@ class WorkerManager:
                 )
                 top_item = result.scalar_one_or_none()
 
+                logger.info(
+                    f"[worker] space={space_id}: current={current_track_id} "
+                    f"upcoming={len(upcoming_ids)} on_deck=free retired={len(retire_ids)} "
+                    f"top_pending={top_item.track_id if top_item else None}"
+                )
+
                 if top_item and top_item.track_id != current_track_id:
                     if top_item.track_id in upcoming_ids:
                         # Already in Spotify's queue — record it, don't add a duplicate.
@@ -259,6 +271,11 @@ class WorkerManager:
                             logger.error(
                                 f"Failed to add to Spotify queue in space {space_id}: {e}"
                             )
+            else:
+                logger.info(
+                    f"[worker] space={space_id}: current={current_track_id} "
+                    f"on_deck={state['on_deck_id']} (locked; waiting to advance)"
+                )
 
 
 # Global singleton
