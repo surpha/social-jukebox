@@ -3,12 +3,12 @@ import logging
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.database import async_session
-from app.models import QueueItem, Space, User
+from app.models import QueueItem, Space, User, Vote
 from app.routers.spotify import get_spotify_client, _encrypt
 
 logger = logging.getLogger(__name__)
@@ -29,6 +29,19 @@ class WorkerManager:
         task = asyncio.create_task(self._poll_loop(space.id, user.id))
         self._tasks[space.id] = task
         logger.info(f"Worker started for space '{space.name}' ({space.code})")
+
+    @staticmethod
+    async def _retire_items(db: AsyncSession, item_ids: list[uuid.UUID]) -> None:
+        """Remove finished queue items and their votes.
+
+        We delete rather than set status='played' because the unique constraint on
+        (space_id, track_id, status) only allows one row per track+status, so a
+        repeat play of the same track would collide and abort the worker's commit.
+        """
+        if not item_ids:
+            return
+        await db.execute(delete(Vote).where(Vote.queue_item_id.in_(item_ids)))
+        await db.execute(delete(QueueItem).where(QueueItem.id.in_(item_ids)))
 
     async def stop_worker(self, space_id: uuid.UUID):
         """Stop a worker for a space."""
@@ -69,12 +82,11 @@ class WorkerManager:
         try:
             async with async_session() as db:
                 stale = await db.execute(
-                    select(QueueItem).where(
+                    select(QueueItem.id).where(
                         QueueItem.space_id == space_id, QueueItem.status == "queued"
                     )
                 )
-                for qi in stale.scalars().all():
-                    qi.status = "played"
+                await self._retire_items(db, [row[0] for row in stale.all()])
                 await db.commit()
         except Exception as e:
             logger.warning(f"Failed to clear stale on-deck for space {space_id}: {e}")
@@ -144,10 +156,6 @@ class WorkerManager:
                 return
 
             if not playback or not playback.get("item"):
-                logger.info(
-                    f"[queue] space={space_id}: no active playback/device — "
-                    f"host must be playing on an active Spotify device to queue"
-                )
                 return
 
             current_track_id = playback["item"]["id"]
@@ -169,10 +177,11 @@ class WorkerManager:
                 .order_by(QueueItem.created_at.desc())
             )
             has_on_deck = False
+            retire_ids: list[uuid.UUID] = []
             for qi in queued_result.scalars().all():
                 if qi.track_id == current_track_id:
-                    # It advanced to playing — free the slot so the next song locks in.
-                    qi.status = "played"
+                    # It advanced to playing — retire it so the next song locks in.
+                    retire_ids.append(qi.id)
                     if state["on_deck_id"] == qi.track_id:
                         self._reset_on_deck(state)
                     continue
@@ -201,7 +210,7 @@ class WorkerManager:
                 if (state["seen"] and state["misses"] >= 2) or (
                     not state["seen"] and state["unseen"] >= 6
                 ):
-                    qi.status = "played"
+                    retire_ids.append(qi.id)
                     self._reset_on_deck(state)
                     logger.info(
                         f"Freeing stuck/skipped on-deck '{qi.name}' in space {space_id}"
@@ -209,6 +218,7 @@ class WorkerManager:
                     continue
 
                 has_on_deck = True
+            await self._retire_items(db, retire_ids)
             await db.commit()
 
             # Slot is free → lock in the current top-voted pending track.
@@ -249,16 +259,6 @@ class WorkerManager:
                             logger.error(
                                 f"Failed to add to Spotify queue in space {space_id}: {e}"
                             )
-                elif top_item is None:
-                    logger.info(
-                        f"[queue] space={space_id}: slot free but no pending votes to queue"
-                    )
-            else:
-                logger.info(
-                    f"[queue] space={space_id}: on-deck '{state['on_deck_id']}' still "
-                    f"locked (seen={state['seen']}, misses={state['misses']}, "
-                    f"unseen={state['unseen']}); not adding another"
-                )
 
 
 # Global singleton

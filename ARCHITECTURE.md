@@ -115,7 +115,7 @@ erDiagram
         text album_art
         int duration_ms
         int vote_count
-        string status "pending|queued|played"
+        string status "pending|queued (finished rows are deleted)"
     }
     Vote {
         uuid id PK
@@ -168,10 +168,12 @@ The **active DJ (or owner fallback)** provides the Spotify credentials used for 
   1. Loads the DJ user + fresh Spotify client (refreshing/persisting tokens if expired).
   2. Reads `current_playback()` and Spotify's upcoming `queue()` (eventually-consistent; may be empty).
   3. Reconciles the on-deck (`queued`) item, freeing the slot only when it **actually starts
-     playing** (advances) or is **confirmed gone across two reliable polls** (a real manual skip).
-     It never releases on a single stale snapshot — that previously caused double-queues/flapping.
+     playing** (advances) or is **confirmed gone across reliable polls** (a real manual skip).
+     Finished items are **deleted** (with their votes), not marked `played` — the unique
+     `(space_id, track_id, status)` constraint only allows one row per track+status, so a repeat
+     play would otherwise collide and abort the worker's commit.
   4. When the slot is free, locks the top-voted `pending` item: skips the add if it's already in
-     Spotify's queue (idempotent), targets the active `device_id`, then flips it to `queued`.
+     Spotify's queue (idempotent), then flips it to `queued`.
 - Per-space loop state (`on_deck_id`, `seen`, `misses`) tracks queue-snapshot propagation so the
   eventually-consistent `queue()` API can't trigger premature releases.
 

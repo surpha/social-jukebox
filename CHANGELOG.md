@@ -17,6 +17,12 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   guest page), with mutual up/down clearing. Uses the existing `has_downvoted` queue data.
 
 ### Fixed
+- Worker no longer silently stops queueing after a track repeats. Finished tracks were marked
+  `status='played'`, but the unique `(space_id, track_id, status)` constraint only allows one row
+  per track+status, so replaying/re-voting a track made the `UPDATE ... SET status='played'` throw
+  `UniqueViolationError`. That aborted the whole poll **before** the add-to-queue step, so nothing
+  new was ever queued. Finished items (and their votes) are now **deleted** instead of marked
+  played, which removes the collision and prevents unbounded row growth.
 - On-deck locking is now reliable. The worker keeps exactly one top-voted track locked in Spotify
   as the next song and only frees that slot when the track actually starts playing or is confirmed
   gone. Previously it released the slot on a single eventually-consistent `queue()` snapshot, which

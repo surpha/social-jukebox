@@ -49,7 +49,7 @@ class QueueItem(Base):
     album_art: Mapped[str] = mapped_column(Text, nullable=False)
     duration_ms: Mapped[int] = mapped_column(Integer, nullable=False)
     vote_count: Mapped[int] = mapped_column(Integer, default=1)
-    status: Mapped[str] = mapped_column(String(20), default="pending")  # pending, queued, played
+    status: Mapped[str] = mapped_column(String(20), default="pending")  # pending, queued (finished items are deleted)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     space: Mapped["Space"] = relationship(back_populates="queue_items")
