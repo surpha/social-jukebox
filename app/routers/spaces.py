@@ -5,13 +5,15 @@ import string
 import qrcode
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
+from sqlalchemy import delete as sa_delete
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_user
 from app.config import get_settings
 from app.database import get_db
-from app.models import Space, User
+from app.engine import delete_items, engine_manager
+from app.models import QueueItem, Space, User
 from app.schemas import CreateSpaceRequest, SpaceResponse
 
 router = APIRouter(prefix="/api/spaces", tags=["spaces"])
@@ -91,14 +93,12 @@ async def activate_space(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Activate a space and start the background worker."""
+    """Activate a space and start its playback engine."""
     space = await _get_owned_space(code, current_user, db)
     space.is_active = True
     await db.commit()
 
-    # Start background worker
-    from app.worker import worker_manager
-    await worker_manager.start_worker(space, current_user, db)
+    await engine_manager.start(space.id, current_user.id, space.name)
 
     return {"status": "active", "code": space.code}
 
@@ -109,38 +109,14 @@ async def deactivate_space(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Deactivate a space, stop the background worker, and clear the queue."""
-    from sqlalchemy import delete as sa_delete
-
-    from app.models import QueueItem, Vote
-
+    """Deactivate a space, stop its engine, and clear the queue."""
     space = await _get_owned_space(code, current_user, db)
+    await engine_manager.stop(space.id)
+
     space.is_active = False
-
-    # Clear all pending and queued items (and their votes) for this space
-    # First get the queue item IDs to delete their votes
-    result = await db.execute(
-        select(QueueItem.id).where(
-            QueueItem.space_id == space.id,
-            QueueItem.status.in_(["pending", "queued"]),
-        )
-    )
-    queue_item_ids = [row[0] for row in result.all()]
-
-    if queue_item_ids:
-        # Delete votes for those queue items
-        await db.execute(
-            sa_delete(Vote).where(Vote.queue_item_id.in_(queue_item_ids))
-        )
-        # Delete the queue items
-        await db.execute(
-            sa_delete(QueueItem).where(QueueItem.id.in_(queue_item_ids))
-        )
-
+    result = await db.execute(select(QueueItem.id).where(QueueItem.space_id == space.id))
+    await delete_items(db, [row[0] for row in result.all()])
     await db.commit()
-
-    from app.worker import worker_manager
-    await worker_manager.stop_worker(space.id)
 
     return {"status": "inactive", "code": space.code}
 
@@ -153,12 +129,11 @@ async def delete_space(
 ):
     """Delete a space."""
     space = await _get_owned_space(code, current_user, db)
+    await engine_manager.stop(space.id)
 
-    # Stop worker if running
-    from app.worker import worker_manager
-    await worker_manager.stop_worker(space.id)
-
-    await db.delete(space)
+    result = await db.execute(select(QueueItem.id).where(QueueItem.space_id == space.id))
+    await delete_items(db, [row[0] for row in result.all()])
+    await db.execute(sa_delete(Space).where(Space.id == space.id))
     await db.commit()
 
 

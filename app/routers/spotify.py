@@ -1,243 +1,121 @@
-import asyncio
-from datetime import datetime, timezone
+import logging
+from uuid import UUID
 
-import spotipy
-from cryptography.fernet import Fernet
-from spotipy.cache_handler import MemoryCacheHandler
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import RedirectResponse
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import get_current_user
+from app.auth import create_oauth_state, get_current_user, verify_oauth_state
 from app.config import get_settings
 from app.database import get_db
+from app.engine import engine_manager
 from app.models import User
+from app.spotify_client import (
+    HOST_SCOPES,
+    SpotifyError,
+    api,
+    authorize_url,
+    exchange_code,
+    invalidate_token,
+    store_tokens,
+    track_summary,
+)
 
 router = APIRouter(prefix="/api/spotify", tags=["spotify"])
 settings = get_settings()
-
-# Derive a Fernet key from the secret (must be 32 url-safe base64-encoded bytes)
-import base64
-import hashlib
-
-_key = base64.urlsafe_b64encode(hashlib.sha256(settings.secret_key.encode()).digest())
-_fernet = Fernet(_key)
-
-SPOTIFY_SCOPES = "user-modify-playback-state user-read-playback-state user-read-currently-playing user-top-read"
-
-
-def _encrypt(value: str) -> str:
-    return _fernet.encrypt(value.encode()).decode()
-
-
-def _decrypt(value: str) -> str:
-    return _fernet.decrypt(value.encode()).decode()
-
-
-SPOTIFY_TIMEOUT = 8
-
-
-def _get_oauth_manager() -> spotipy.SpotifyOAuth:
-    # Per-request memory cache: the default file cache (.cache) is shared by all users.
-    return spotipy.SpotifyOAuth(
-        client_id=settings.spotify_client_id,
-        client_secret=settings.spotify_client_secret,
-        redirect_uri=settings.spotify_redirect_uri,
-        scope=SPOTIFY_SCOPES,
-        show_dialog=True,
-        cache_handler=MemoryCacheHandler(),
-        open_browser=False,
-        requests_timeout=SPOTIFY_TIMEOUT,
-    )
-
-
-async def spotify_call(fn, *args, **kwargs):
-    """Run a blocking spotipy call in a thread so it doesn't stall the event loop."""
-    return await asyncio.to_thread(fn, *args, **kwargs)
-
-
-def get_spotify_client(user: User) -> spotipy.Spotify | None:
-    """Create an authenticated Spotify client for a user, handling token refresh."""
-    if not user.spotify_refresh_token:
-        return None
-
-    oauth = _get_oauth_manager()
-    token_info = {
-        "access_token": _decrypt(user.spotify_access_token),
-        "refresh_token": _decrypt(user.spotify_refresh_token),
-        "expires_at": int(user.spotify_token_expires.timestamp()) if user.spotify_token_expires else 0,
-    }
-
-    # Check if token needs refresh
-    if oauth.is_token_expired(token_info):
-        new_token = oauth.refresh_access_token(token_info["refresh_token"])
-        token_info = new_token
-        # We'll update the DB in the calling context if needed
-        user._refreshed_token = new_token  # Attach for caller to persist
-
-    return spotipy.Spotify(
-        auth=token_info["access_token"], requests_timeout=SPOTIFY_TIMEOUT, retries=1
-    )
-
-
-async def get_spotify_client_for_user(user: User, db: AsyncSession) -> spotipy.Spotify:
-    """Get Spotify client and persist any refreshed tokens."""
-    sp = await spotify_call(get_spotify_client, user)
-    if sp is None:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Spotify not linked")
-
-    # Persist refreshed token if it was refreshed
-    if hasattr(user, "_refreshed_token"):
-        new_token = user._refreshed_token
-        user.spotify_access_token = _encrypt(new_token["access_token"])
-        user.spotify_refresh_token = _encrypt(new_token["refresh_token"])
-        user.spotify_token_expires = datetime.fromtimestamp(new_token["expires_at"], tz=timezone.utc)
-        del user._refreshed_token
-        await db.commit()
-
-    return sp
+logger = logging.getLogger(__name__)
 
 
 @router.get("/link")
 async def spotify_link(current_user: User = Depends(get_current_user)):
     """Returns the Spotify OAuth URL for the user to authorize."""
-    oauth = _get_oauth_manager()
-    # Embed user ID in state for callback
-    auth_url = oauth.get_authorize_url(state=str(current_user.id))
-    return {"auth_url": auth_url}
+    state = create_oauth_state("spotify_link", str(current_user.id))
+    return {"auth_url": authorize_url(settings.spotify_redirect_uri, HOST_SCOPES, state)}
 
 
 @router.get("/callback")
 async def spotify_callback(
-    code: str = Query(...),
+    code: str | None = Query(default=None),
+    error: str | None = Query(default=None),
     state: str = Query(default=""),
     db: AsyncSession = Depends(get_db),
 ):
     """Handles Spotify OAuth callback, stores encrypted tokens."""
-    oauth = _get_oauth_manager()
-    token_info = await spotify_call(oauth.get_access_token, code, as_dict=True, check_cache=False)
+    if error or not code:
+        return RedirectResponse(url=f"{settings.app_url}/dashboard?error=spotify_denied")
 
-    if not token_info or "access_token" not in token_info:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Failed to get Spotify token")
-
-    # Find user from state (user_id)
-    from uuid import UUID
-    from sqlalchemy import select
+    user_id = verify_oauth_state(state, "spotify_link")
+    if not user_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired state")
 
     try:
-        user_id = UUID(state)
-    except (ValueError, TypeError):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid state parameter")
+        token_info = await exchange_code(code, settings.spotify_redirect_uri)
+    except SpotifyError:
+        return RedirectResponse(url=f"{settings.app_url}/dashboard?error=spotify_denied")
 
-    result = await db.execute(select(User).where(User.id == user_id))
-    user = result.scalar_one_or_none()
+    user = (await db.execute(select(User).where(User.id == UUID(user_id)))).scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
-    # Store encrypted tokens
-    user.spotify_access_token = _encrypt(token_info["access_token"])
-    user.spotify_refresh_token = _encrypt(token_info["refresh_token"])
-    user.spotify_token_expires = datetime.fromtimestamp(token_info["expires_at"], tz=timezone.utc)
+    store_tokens(user, token_info)
     await db.commit()
+    invalidate_token(user.id)
 
-    # Redirect to dashboard
     return RedirectResponse(url=f"{settings.app_url}/dashboard?spotify=linked")
 
 
 @router.get("/status")
 async def spotify_status(current_user: User = Depends(get_current_user)):
     """Check if the current user has linked Spotify."""
-    return {
-        "linked": current_user.spotify_refresh_token is not None,
-    }
+    return {"linked": current_user.spotify_refresh_token is not None}
 
 
 # --- Playback Controls (owner only) ---
 
-@router.post("/playback/play")
-async def playback_play(
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """Resume playback."""
-    sp = await get_spotify_client_for_user(current_user, db)
+_CONTROLS = {
+    "play": ("PUT", "/me/player/play", "playing"),
+    "pause": ("PUT", "/me/player/pause", "paused"),
+    "skip": ("POST", "/me/player/next", "skipped"),
+}
+
+
+@router.post("/playback/{action}")
+async def playback_control(action: str, current_user: User = Depends(get_current_user)):
+    if action not in _CONTROLS:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unknown action")
+    method, path, result = _CONTROLS[action]
     try:
-        await spotify_call(sp.start_playback)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    return {"status": "playing"}
-
-
-@router.post("/playback/pause")
-async def playback_pause(
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """Pause playback."""
-    sp = await get_spotify_client_for_user(current_user, db)
-    try:
-        await spotify_call(sp.pause_playback)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    return {"status": "paused"}
-
-
-@router.post("/playback/skip")
-async def playback_skip(
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """Skip to next track."""
-    sp = await get_spotify_client_for_user(current_user, db)
-    try:
-        await spotify_call(sp.next_track)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    return {"status": "skipped"}
+        await api(current_user.id, method, path)
+    except SpotifyError as e:
+        logger.warning(f"Playback {action} failed for user {current_user.id}: {e}")
+        detail = "No active Spotify device. Open Spotify and start playing." if e.status == 404 else f"Could not {action}"
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail)
+    engine_manager.poke_owner(current_user.id)
+    return {"status": result}
 
 
 @router.get("/playback/now-playing")
-async def playback_now_playing(
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
+async def playback_now_playing(current_user: User = Depends(get_current_user)):
     """Get current playback state for owner dashboard."""
-    sp = await get_spotify_client_for_user(current_user, db)
     try:
-        playback = await spotify_call(sp.current_playback)
-        if not playback or not playback.get("item"):
-            return {"is_playing": False}
-        item = playback["item"]
-        return {
-            "is_playing": playback.get("is_playing", False),
-            "name": item["name"],
-            "artist": ", ".join(a["name"] for a in item["artists"]),
-            "album_art": item["album"]["images"][0]["url"] if item["album"]["images"] else "",
-            "progress_ms": playback.get("progress_ms", 0),
-            "duration_ms": item.get("duration_ms", 0),
-        }
-    except Exception:
+        playback = await api(current_user.id, "GET", "/me/player", params={"additional_types": "track"})
+    except SpotifyError:
         return {"is_playing": False}
+    if not playback or not playback.get("item"):
+        return {"is_playing": False}
+    return {
+        **track_summary(playback["item"]),
+        "is_playing": playback.get("is_playing", False),
+        "progress_ms": playback.get("progress_ms", 0),
+    }
 
 
 @router.get("/playback/queue")
-async def playback_queue(
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
+async def playback_queue(current_user: User = Depends(get_current_user)):
     """Get Spotify's actual queue (next tracks lined up)."""
-    sp = await get_spotify_client_for_user(current_user, db)
     try:
-        queue_data = await spotify_call(sp.queue)
-        tracks = queue_data.get("queue", [])[:10]
-        return [
-            {
-                "name": t["name"],
-                "artist": ", ".join(a["name"] for a in t["artists"]),
-                "album_art": t["album"]["images"][0]["url"] if t["album"]["images"] else "",
-                "duration_ms": t.get("duration_ms", 0),
-            }
-            for t in tracks
-        ]
-    except Exception:
+        data = await api(current_user.id, "GET", "/me/player/queue")
+    except SpotifyError:
         return []
+    return [track_summary(t) for t in (data or {}).get("queue", [])[:10] if t and t.get("id")]

@@ -1,26 +1,21 @@
-from datetime import datetime, timezone
+import secrets
 
-import spotipy
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Cookie, Depends, Query, Response
 from fastapi.responses import RedirectResponse
-from spotipy.cache_handler import MemoryCacheHandler
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import (
-    create_access_token,
-    get_current_user,
-)
+from app.auth import create_access_token, create_oauth_state, get_current_user, verify_oauth_state
 from app.config import get_settings
 from app.database import get_db
 from app.models import User
-from app.routers.spotify import SPOTIFY_TIMEOUT, _encrypt, spotify_call
-from app.schemas import (
-    UserResponse,
-)
+from app.schemas import UserResponse
+from app.spotify_client import LOGIN_SCOPES, SpotifyError, authorize_url, exchange_code, invalidate_token, request_with_token, store_tokens
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 settings = get_settings()
+
+_NONCE_COOKIE = "oauth_nonce"
 
 
 @router.get("/me", response_model=UserResponse)
@@ -34,90 +29,57 @@ async def get_me(current_user: User = Depends(get_current_user)):
     )
 
 
-# --- Spotify OAuth Login/Signup ---
-
-SPOTIFY_LOGIN_SCOPES = "user-modify-playback-state user-read-playback-state user-read-currently-playing user-top-read user-read-email user-read-private"
-
-
-def _get_spotify_login_oauth() -> spotipy.SpotifyOAuth:
-    return spotipy.SpotifyOAuth(
-        client_id=settings.spotify_client_id,
-        client_secret=settings.spotify_client_secret,
-        redirect_uri=settings.spotify_login_redirect_uri,
-        scope=SPOTIFY_LOGIN_SCOPES,
-        show_dialog=True,
-        cache_handler=MemoryCacheHandler(),
-        open_browser=False,
-        requests_timeout=SPOTIFY_TIMEOUT,
-    )
-
-
 @router.get("/spotify/login")
-async def spotify_login():
+async def spotify_login(response: Response):
     """Returns the Spotify OAuth URL for login/signup."""
-    oauth = _get_spotify_login_oauth()
-    auth_url = oauth.get_authorize_url(state="login")
-    return {"auth_url": auth_url}
+    nonce = secrets.token_urlsafe(16)
+    response.set_cookie(
+        _NONCE_COOKIE, nonce, max_age=600, httponly=True, samesite="lax",
+        secure=settings.app_url.startswith("https"),
+    )
+    state = create_oauth_state("spotify_login", nonce)
+    return {"auth_url": authorize_url(settings.spotify_login_redirect_uri, LOGIN_SCOPES, state)}
 
 
 @router.get("/spotify/callback")
 async def spotify_login_callback(
-    code: str = Query(default=None),
-    error: str = Query(default=None),
+    code: str | None = Query(default=None),
+    error: str | None = Query(default=None),
     state: str = Query(default=""),
+    oauth_nonce: str | None = Cookie(default=None),
     db: AsyncSession = Depends(get_db),
 ):
     """Handles Spotify OAuth callback for login/signup. Creates or finds user, links Spotify tokens."""
+    denied = RedirectResponse(url=f"{settings.app_url}/?error=spotify_denied")
     if error or not code:
-        return RedirectResponse(url=f"{settings.app_url}/?error=spotify_denied")
+        return denied
 
-    oauth = _get_spotify_login_oauth()
+    nonce = verify_oauth_state(state, "spotify_login")
+    if not nonce or not oauth_nonce or not secrets.compare_digest(nonce, oauth_nonce):
+        return denied
+
     try:
-        token_info = await spotify_call(oauth.get_access_token, code, as_dict=True, check_cache=False)
-    except spotipy.SpotifyOauthError:
+        token_info = await exchange_code(code, settings.spotify_login_redirect_uri)
+        profile = await request_with_token(token_info["access_token"], "GET", "/me") or {}
+    except SpotifyError:
         # Expired/reused code (e.g. user refreshed the callback page): just restart login.
-        return RedirectResponse(url=f"{settings.app_url}/?error=spotify_denied")
+        return denied
 
-    if not token_info or "access_token" not in token_info:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Failed to get Spotify token")
-
-    # Get user profile from Spotify
-    sp = spotipy.Spotify(auth=token_info["access_token"], requests_timeout=SPOTIFY_TIMEOUT)
-    spotify_profile = await spotify_call(sp.current_user)
-
-    spotify_id = spotify_profile.get("id")
-    email = spotify_profile.get("email")
-    display_name = spotify_profile.get("display_name") or spotify_id
-
+    email = profile.get("email")
     if not email:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Could not get email from Spotify. Please ensure your Spotify account has a verified email.",
-        )
+        return RedirectResponse(url=f"{settings.app_url}/?error=no_email")
+    display_name = profile.get("display_name") or profile.get("id") or email
 
-    # Check if user exists by email
-    result = await db.execute(select(User).where(User.email == email))
-    user = result.scalar_one_or_none()
-
-    if user:
-        # Update Spotify tokens for existing user
-        user.spotify_access_token = _encrypt(token_info["access_token"])
-        user.spotify_refresh_token = _encrypt(token_info["refresh_token"])
-        user.spotify_token_expires = datetime.fromtimestamp(token_info["expires_at"], tz=timezone.utc)
-        await db.commit()
-    else:
-        # Create new user with Spotify tokens
-        user = User(
-            email=email,
-            name=display_name,
-            spotify_access_token=_encrypt(token_info["access_token"]),
-            spotify_refresh_token=_encrypt(token_info["refresh_token"]),
-            spotify_token_expires=datetime.fromtimestamp(token_info["expires_at"], tz=timezone.utc),
-        )
+    user = (await db.execute(select(User).where(User.email == email))).scalar_one_or_none()
+    if not user:
+        user = User(email=email, name=display_name)
         db.add(user)
-        await db.commit()
-        await db.refresh(user)
+    store_tokens(user, token_info)
+    await db.commit()
+    await db.refresh(user)
+    invalidate_token(user.id)
 
-    # Create JWT and redirect to dashboard with token
-    token = create_access_token(user.id)
-    return RedirectResponse(url=f"{settings.app_url}/dashboard?token={token}&spotify=linked")
+    # Fragment, not query string: keeps the JWT out of server logs and Referer headers.
+    redirect = RedirectResponse(url=f"{settings.app_url}/dashboard#token={create_access_token(user.id)}")
+    redirect.delete_cookie(_NONCE_COOKIE)
+    return redirect
