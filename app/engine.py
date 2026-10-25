@@ -20,7 +20,6 @@ from app.spotify_client import SpotifyNotLinked, SpotifyRateLimited, api, track_
 
 logger = logging.getLogger(__name__)
 
-LOCK_IN_MS = 20_000  # hand the top-voted song to Spotify this long before the current one ends
 IDLE_POLL = 5.0
 MIN_POLL = 0.75
 SPOTIFY_QUEUE_REFRESH = 15.0
@@ -252,7 +251,7 @@ class SpaceEngine:
                 self._dirty.set()
                 continue
             self.publish()
-            if self.on_deck is None and self.pending and self._near_lock_in():
+            if self.on_deck is None and self.pending:
                 self.poke()
 
     # --- core logic ---
@@ -265,10 +264,6 @@ class SpaceEngine:
         if np["is_playing"]:
             progress += int((self.clock() - self._np_at) * 1000)
         return min(progress, np["duration_ms"]) if np["duration_ms"] else progress
-
-    def _near_lock_in(self) -> bool:
-        np = self.now_playing
-        return bool(np) and np["duration_ms"] - self.estimated_progress() <= LOCK_IN_MS + 2000
 
     async def tick(self) -> float:
         """Poll Spotify once and react. Returns seconds until the next poll."""
@@ -317,7 +312,9 @@ class SpaceEngine:
                         self._misses = 0
 
         remaining = duration - progress
-        if self.on_deck is None and self.pending and remaining <= LOCK_IN_MS:
+        # Keep the on-deck slot filled at all times: Spotify can't un-queue, and a mid-song
+        # skip must land on the voted song rather than whatever Spotify would play next.
+        if self.on_deck is None and self.pending:
             await self._lock_in(self.pending[0])
             refresh_queue = True
 
@@ -329,8 +326,6 @@ class SpaceEngine:
         if not playing:
             return IDLE_POLL
         delay = max(remaining, 0) / 1000 + 0.5  # wake right after the track ends
-        if self.on_deck is None and self.pending:
-            delay = min(delay, max(remaining - LOCK_IN_MS, 0) / 1000)
         if self._misses:
             delay = min(delay, 2.0)
         return min(IDLE_POLL, max(MIN_POLL, delay))

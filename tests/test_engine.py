@@ -4,7 +4,7 @@ import uuid
 
 import pytest
 
-from app.engine import IDLE_POLL, LOCK_IN_MS, MAX_ON_DECK_MISSES, MIN_POLL, SpaceEngine
+from app.engine import IDLE_POLL, MAX_ON_DECK_MISSES, MIN_POLL, SpaceEngine
 
 
 def track(tid: str, duration=200_000, artists=None) -> dict:
@@ -97,28 +97,43 @@ async def make_engine(store=None, spotify=None):
     return engine, spotify, store, clock
 
 
-async def test_does_not_lock_in_early_and_wakes_at_lock_in_time():
+async def test_locks_in_immediately_so_a_mid_song_skip_plays_the_voted_song():
     engine, sp, store, _ = await make_engine()
-    store.add("aaa")
+    store.add('aaa')
+    store.add('bbb')
     engine.pending = await store.load_pending()
-    sp.play("cur", progress=100_000)  # 100s remaining
+    sp.play('cur', progress=30_000)  # early in the song
 
-    delay = await engine.tick()
+    await engine.tick()
+    assert sp.added == ['aaa']
+    assert engine.on_deck['track_id'] == 'aaa'
 
-    assert sp.added == []
-    assert engine.on_deck is None
-    assert delay == IDLE_POLL  # capped
-    sp.play("cur", progress=200_000 - LOCK_IN_MS - 3000)
-    delay = await engine.tick()
-    assert delay == pytest.approx(3.0)
+    # Host skips mid-song: the on-deck song plays, and the next one is locked straight away.
+    sp.play('aaa', progress=0)
+    await engine.tick()
+    assert sp.added == ['aaa', 'bbb']
+    assert engine.on_deck['track_id'] == 'bbb'
+    assert 'id-aaa' not in store.items
 
 
-async def test_locks_in_top_voted_near_end_of_track():
+async def test_only_one_song_on_deck_at_a_time():
+    engine, sp, store, _ = await make_engine()
+    store.add('aaa')
+    store.add('bbb')
+    engine.pending = await store.load_pending()
+    sp.play('cur', progress=30_000)
+    await engine.tick()
+    await engine.tick()
+    assert sp.added == ['aaa']
+    assert [p['track_id'] for p in engine.pending] == ['bbb']
+
+
+async def test_locks_in_top_voted():
     engine, sp, store, _ = await make_engine()
     store.add("low", votes=1)
     store.add("top", votes=5)
     engine.pending = await store.load_pending()
-    sp.play("cur", progress=200_000 - 15_000)
+    sp.play("cur", progress=10_000)
 
     await engine.tick()
 
