@@ -648,12 +648,12 @@
     }
 
     // --- Load Recommendations ---
-    let lastRecsTrackId = null;
+    let lastRecsTrackId;  // undefined until first load, so a null (nothing playing) track still counts
 
     async function loadRecommendations(force = false) {
         // Only reload recs if the currently playing track changed (or forced)
         const nowId = currentTrackId;
-        if (!force && nowId && nowId === lastRecsTrackId) return;
+        if (!force && nowId === lastRecsTrackId) return;
         lastRecsTrackId = nowId;
 
         try {

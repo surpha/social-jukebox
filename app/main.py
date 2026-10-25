@@ -54,3 +54,9 @@ app.include_router(auth_routes.router)
 app.include_router(spotify.router)
 app.include_router(spaces.router)
 app.include_router(queue.router)
+
+
+@app.api_route("/health", methods=["GET", "HEAD"])
+async def health():
+    """Liveness probe for Render and uptime pingers (keeps the free tier awake)."""
+    return {"status": "ok"}

@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 import spotipy
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import RedirectResponse
+from spotipy.cache_handler import MemoryCacheHandler
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,6 +14,7 @@ from app.auth import (
 from app.config import get_settings
 from app.database import get_db
 from app.models import User
+from app.routers.spotify import SPOTIFY_TIMEOUT, _encrypt, spotify_call
 from app.schemas import (
     UserResponse,
 )
@@ -44,6 +46,9 @@ def _get_spotify_login_oauth() -> spotipy.SpotifyOAuth:
         redirect_uri=settings.spotify_login_redirect_uri,
         scope=SPOTIFY_LOGIN_SCOPES,
         show_dialog=True,
+        cache_handler=MemoryCacheHandler(),
+        open_browser=False,
+        requests_timeout=SPOTIFY_TIMEOUT,
     )
 
 
@@ -66,17 +71,19 @@ async def spotify_login_callback(
     if error or not code:
         return RedirectResponse(url=f"{settings.app_url}/?error=spotify_denied")
 
-    from app.routers.spotify import _encrypt
-
     oauth = _get_spotify_login_oauth()
-    token_info = oauth.get_access_token(code, as_dict=True)
+    try:
+        token_info = await spotify_call(oauth.get_access_token, code, as_dict=True, check_cache=False)
+    except spotipy.SpotifyOauthError:
+        # Expired/reused code (e.g. user refreshed the callback page): just restart login.
+        return RedirectResponse(url=f"{settings.app_url}/?error=spotify_denied")
 
     if not token_info or "access_token" not in token_info:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Failed to get Spotify token")
 
     # Get user profile from Spotify
-    sp = spotipy.Spotify(auth=token_info["access_token"])
-    spotify_profile = sp.current_user()
+    sp = spotipy.Spotify(auth=token_info["access_token"], requests_timeout=SPOTIFY_TIMEOUT)
+    spotify_profile = await spotify_call(sp.current_user)
 
     spotify_id = spotify_profile.get("id")
     email = spotify_profile.get("email")

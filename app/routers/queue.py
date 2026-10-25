@@ -1,13 +1,17 @@
+import asyncio
+import logging
+import time
 import uuid
 
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Response, status
-from sqlalchemy import select
+from sqlalchemy import select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.database import get_db
 from app.models import QueueItem, Space, User, Vote
-from app.routers.spotify import get_spotify_client_for_user
+from app.routers.spotify import get_spotify_client_for_user, spotify_call
 from app.schemas import (
     AddTrackRequest,
     NowPlayingResponse,
@@ -19,6 +23,61 @@ from app.schemas import (
 
 router = APIRouter(prefix="/api/spaces/{code}", tags=["queue"])
 settings = get_settings()
+logger = logging.getLogger(__name__)
+
+# Every guest polls /queue every few seconds; share one Spotify fetch per space.
+_PLAYBACK_TTL = 3.0
+_RECS_TTL = 300.0
+_playback_cache: dict[uuid.UUID, tuple[float, dict | None, list]] = {}
+_playback_locks: dict[uuid.UUID, asyncio.Lock] = {}
+_recs_cache: dict[tuple[uuid.UUID, str | None], tuple[float, list]] = {}
+_recs_locks: dict[uuid.UUID, asyncio.Lock] = {}
+
+
+async def _get_playback_and_queue(space: Space, owner: User, db: AsyncSession) -> tuple[dict | None, list]:
+    """Return (current_playback, upcoming_queue) for a space, cached for a few seconds."""
+    cached = _playback_cache.get(space.id)
+    if cached and cached[0] > time.monotonic():
+        return cached[1], cached[2]
+
+    lock = _playback_locks.setdefault(space.id, asyncio.Lock())
+    async with lock:
+        cached = _playback_cache.get(space.id)
+        if cached and cached[0] > time.monotonic():
+            return cached[1], cached[2]
+
+        playback, upcoming = None, []
+        try:
+            sp = await get_spotify_client_for_user(owner, db)
+            playback, queue_data = await asyncio.gather(
+                spotify_call(sp.current_playback),
+                spotify_call(sp.queue),
+                return_exceptions=True,
+            )
+            if isinstance(playback, Exception):
+                logger.warning(f"Spotify playback fetch failed for space {space.code}: {type(playback).__name__}")
+                playback = None
+            if not isinstance(queue_data, Exception) and queue_data:
+                upcoming = (queue_data.get("queue") or [])[:20]
+        except Exception as e:
+            logger.warning(f"Spotify client failed for space {space.code}: {type(e).__name__}")
+
+        _playback_cache[space.id] = (time.monotonic() + _PLAYBACK_TTL, playback, upcoming)
+        return playback, upcoming
+
+
+def _invalidate_playback(space_id: uuid.UUID) -> None:
+    _playback_cache.pop(space_id, None)
+
+
+def _to_search_result(t: dict) -> SearchResult:
+    return SearchResult(
+        track_id=t["id"],
+        name=t["name"],
+        artist=", ".join(a["name"] for a in t["artists"]),
+        album_art=t["album"]["images"][0]["url"] if t["album"]["images"] else "",
+        duration_ms=t["duration_ms"],
+    )
 
 
 async def _get_space_with_owner(code: str, db: AsyncSession) -> tuple[Space, User]:
@@ -54,19 +113,14 @@ async def search_tracks(
     space, owner = await _get_space_with_owner(code, db)
     sp = await get_spotify_client_for_user(owner, db)
 
-    results = sp.search(q=q, type="track", limit=10)
+    try:
+        results = await spotify_call(sp.search, q=q, type="track", limit=10)
+    except Exception as e:
+        logger.warning(f"Spotify search failed for space {code}: {type(e).__name__}")
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Search failed, try again")
     tracks = results.get("tracks", {}).get("items", [])
 
-    return [
-        SearchResult(
-            track_id=t["id"],
-            name=t["name"],
-            artist=", ".join(a["name"] for a in t["artists"]),
-            album_art=t["album"]["images"][0]["url"] if t["album"]["images"] else "",
-            duration_ms=t["duration_ms"],
-        )
-        for t in tracks
-    ]
+    return [_to_search_result(t) for t in tracks if t]
 
 
 @router.get("/recommendations", response_model=list[SearchResult])
@@ -75,24 +129,45 @@ async def get_recommendations(
     db: AsyncSession = Depends(get_db),
 ):
     """Get recommendations closely related to what's currently playing and queued."""
-    import random
-
     space, owner = await _get_space_with_owner(code, db)
-    sp = await get_spotify_client_for_user(owner, db)
 
     seed_tracks = []
     seed_artists = []
 
     # 1. Currently playing track (primary seed)
-    try:
-        playback = sp.current_playback()
-        if playback and playback.get("item"):
-            item = playback["item"]
-            seed_tracks.append(item["id"])
-            if item.get("artists"):
-                seed_artists.append(item["artists"][0]["id"])
-    except Exception:
-        pass
+    playback, _ = await _get_playback_and_queue(space, owner, db)
+    current_id = None
+    if playback and playback.get("item"):
+        item = playback["item"]
+        current_id = item["id"]
+        seed_tracks.append(item["id"])
+        if item.get("artists"):
+            seed_artists.append(item["artists"][0]["id"])
+
+    # Recommendations only change with the song; reuse them for every guest.
+    cache_key = (space.id, current_id)
+    cached = _recs_cache.get(cache_key)
+    if cached and cached[0] > time.monotonic():
+        return cached[1]
+
+    # All guests refetch at the same moment when the song changes; compute once.
+    async with _recs_locks.setdefault(space.id, asyncio.Lock()):
+        cached = _recs_cache.get(cache_key)
+        if cached and cached[0] > time.monotonic():
+            return cached[1]
+        recs = await _compute_recommendations(space, owner, db, seed_tracks, seed_artists)
+        if len(_recs_cache) > 500:
+            _recs_cache.clear()
+        _recs_cache[cache_key] = (time.monotonic() + _RECS_TTL, recs)
+        return recs
+
+
+async def _compute_recommendations(
+    space: Space, owner: User, db: AsyncSession, seed_tracks: list, seed_artists: list
+) -> list[SearchResult]:
+    import random
+
+    sp = await get_spotify_client_for_user(owner, db)
 
     # 2. Tracks from the SJ queue (secondary seeds)
     try:
@@ -136,69 +211,42 @@ async def get_recommendations(
                 kwargs["seed_tracks"] = use_tracks
             if use_artists:
                 kwargs["seed_artists"] = use_artists
-            recs = sp.recommendations(**kwargs)
+            recs = await spotify_call(sp.recommendations, **kwargs)
             tracks = recs.get("tracks", [])
             # Filter out tracks already in queue or currently playing
             existing_ids = set(seed_tracks)
             tracks = [t for t in tracks if t["id"] not in existing_ids]
             if tracks:
-                return [
-                    SearchResult(
-                        track_id=t["id"],
-                        name=t["name"],
-                        artist=", ".join(a["name"] for a in t["artists"]),
-                        album_art=t["album"]["images"][0]["url"] if t["album"]["images"] else "",
-                        duration_ms=t["duration_ms"],
-                    )
-                    for t in tracks[:6]
-                ]
+                return [_to_search_result(t) for t in tracks[:6]]
         except Exception:
             pass
 
     # Fallback: related artists tracks
     if seed_artists:
         try:
-            related = sp.artist_related_artists(seed_artists[0])
+            related = await spotify_call(sp.artist_related_artists, seed_artists[0])
             if related.get("artists"):
                 artist_ids = [a["id"] for a in related["artists"][:3]]
                 random.shuffle(artist_ids)
-                top_tracks = sp.artist_top_tracks(artist_ids[0])
+                top_tracks = await spotify_call(sp.artist_top_tracks, artist_ids[0])
                 tracks = top_tracks.get("tracks", [])
                 existing_ids = set(seed_tracks)
                 tracks = [t for t in tracks if t["id"] not in existing_ids]
                 if tracks:
-                    return [
-                        SearchResult(
-                            track_id=t["id"],
-                            name=t["name"],
-                            artist=", ".join(a["name"] for a in t["artists"]),
-                            album_art=t["album"]["images"][0]["url"] if t["album"]["images"] else "",
-                            duration_ms=t["duration_ms"],
-                        )
-                        for t in tracks[:6]
-                    ]
+                    return [_to_search_result(t) for t in tracks[:6]]
         except Exception:
             pass
 
     # Last resort: search for similar artist
     try:
         if seed_artists:
-            artist_info = sp.artist(seed_artists[0])
+            artist_info = await spotify_call(sp.artist, seed_artists[0])
             query = f"artist:{artist_info['name']}"
         else:
-            query = "top hits 2024"
-        results = sp.search(q=query, type="track", limit=6)
+            query = "top hits"
+        results = await spotify_call(sp.search, q=query, type="track", limit=6)
         tracks = results.get("tracks", {}).get("items", [])
-        return [
-            SearchResult(
-                track_id=t["id"],
-                name=t["name"],
-                artist=", ".join(a["name"] for a in t["artists"]),
-                album_art=t["album"]["images"][0]["url"] if t["album"]["images"] else "",
-                duration_ms=t["duration_ms"],
-            )
-            for t in tracks
-        ]
+        return [_to_search_result(t) for t in tracks if t]
     except Exception:
         return []
 
@@ -250,15 +298,23 @@ async def add_track(
         status="pending",
     )
     db.add(item)
-    await db.flush()
+    try:
+        await db.flush()
+        # Record the initial vote
+        vid = _get_voter_id(voter_id)
+        db.add(Vote(queue_item_id=item.id, voter_id=vid))
+        await db.commit()
+    except IntegrityError:
+        # Another guest added the same track at the same moment.
+        await db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Track already in queue")
 
-    # Record the initial vote
-    vid = _get_voter_id(voter_id)
-    vote = Vote(queue_item_id=item.id, voter_id=vid)
-    db.add(vote)
-    await db.commit()
+    _set_voter_cookie(response, vid)
 
-    # Set voter_id cookie if not present
+    return {"status": "added", "track_id": body.track_id, "vote_count": 1}
+
+
+def _set_voter_cookie(response: Response, vid: str) -> None:
     response.set_cookie(
         key="voter_id",
         value=vid,
@@ -267,7 +323,61 @@ async def add_track(
         samesite="lax",
     )
 
-    return {"status": "added", "track_id": body.track_id, "vote_count": 1}
+
+async def _apply_vote(
+    code: str, track_id: str, direction: str, response: Response, db: AsyncSession, voter_id: str | None
+) -> dict:
+    """Toggle an up/down vote. Uses atomic SQL increments so concurrent votes aren't lost."""
+    space, _ = await _get_space_with_owner(code, db)
+
+    result = await db.execute(
+        select(QueueItem.id).where(
+            QueueItem.space_id == space.id,
+            QueueItem.track_id == track_id,
+            QueueItem.status == "pending",
+        )
+    )
+    item_id = result.scalar_one_or_none()
+    if not item_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Track not found in queue")
+
+    vid = _get_voter_id(voter_id)
+    sign = 1 if direction == "up" else -1
+
+    result = await db.execute(
+        select(Vote).where(Vote.queue_item_id == item_id, Vote.voter_id == vid)
+    )
+    existing_vote = result.scalar_one_or_none()
+
+    if existing_vote and existing_vote.vote_type == direction:
+        await db.delete(existing_vote)
+        delta = -sign
+        new_status = "unvoted" if direction == "up" else "undownvoted"
+    elif existing_vote:
+        existing_vote.vote_type = direction
+        delta = 2 * sign
+        new_status = "voted" if direction == "up" else "downvoted"
+    else:
+        db.add(Vote(queue_item_id=item_id, voter_id=vid, vote_type=direction))
+        delta = sign
+        new_status = "voted" if direction == "up" else "downvoted"
+
+    try:
+        result = await db.execute(
+            update(QueueItem)
+            .where(QueueItem.id == item_id)
+            .values(vote_count=QueueItem.vote_count + delta)
+            .returning(QueueItem.vote_count)
+        )
+        vote_count = result.scalar_one()
+        await db.commit()
+    except IntegrityError:
+        # Double-tap: the same voter's first vote is already being recorded.
+        await db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Vote already in progress")
+
+    _set_voter_cookie(response, vid)
+    return {"status": new_status, "track_id": track_id, "vote_count": vote_count}
 
 
 @router.post("/vote")
@@ -279,60 +389,7 @@ async def vote_track(
     voter_id: str | None = Cookie(default=None),
 ):
     """Toggle upvote on a track in the queue."""
-    space, _ = await _get_space_with_owner(code, db)
-
-    # Find the pending queue item
-    result = await db.execute(
-        select(QueueItem).where(
-            QueueItem.space_id == space.id,
-            QueueItem.track_id == body.track_id,
-            QueueItem.status == "pending",
-        )
-    )
-    item = result.scalar_one_or_none()
-    if not item:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Track not found in queue")
-
-    vid = _get_voter_id(voter_id)
-
-    # Check if already voted
-    result = await db.execute(
-        select(Vote).where(Vote.queue_item_id == item.id, Vote.voter_id == vid)
-    )
-    existing_vote = result.scalar_one_or_none()
-
-    if existing_vote:
-        if existing_vote.vote_type == "up":
-            # Remove upvote (toggle off)
-            await db.delete(existing_vote)
-            item.vote_count = max(0, item.vote_count - 1)
-            await db.commit()
-            response.set_cookie(key="voter_id", value=vid, max_age=60*60*24*30, httponly=True, samesite="lax")
-            return {"status": "unvoted", "track_id": body.track_id, "vote_count": item.vote_count}
-        else:
-            # Was a downvote, switch to upvote
-            existing_vote.vote_type = "up"
-            item.vote_count += 2  # remove -1 and add +1
-            await db.commit()
-            response.set_cookie(key="voter_id", value=vid, max_age=60*60*24*30, httponly=True, samesite="lax")
-            return {"status": "voted", "track_id": body.track_id, "vote_count": item.vote_count}
-
-    # Add upvote
-    vote = Vote(queue_item_id=item.id, voter_id=vid, vote_type="up")
-    db.add(vote)
-    item.vote_count += 1
-    await db.commit()
-
-    # Set voter_id cookie if not present
-    response.set_cookie(
-        key="voter_id",
-        value=vid,
-        max_age=60 * 60 * 24 * 30,
-        httponly=True,
-        samesite="lax",
-    )
-
-    return {"status": "voted", "track_id": body.track_id, "vote_count": item.vote_count}
+    return await _apply_vote(code, body.track_id, "up", response, db, voter_id)
 
 
 @router.post("/downvote")
@@ -344,59 +401,7 @@ async def downvote_track(
     voter_id: str | None = Cookie(default=None),
 ):
     """Toggle downvote on a track in the queue."""
-    space, _ = await _get_space_with_owner(code, db)
-
-    # Find the pending queue item
-    result = await db.execute(
-        select(QueueItem).where(
-            QueueItem.space_id == space.id,
-            QueueItem.track_id == body.track_id,
-            QueueItem.status == "pending",
-        )
-    )
-    item = result.scalar_one_or_none()
-    if not item:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Track not found in queue")
-
-    vid = _get_voter_id(voter_id)
-
-    # Check if already voted
-    result = await db.execute(
-        select(Vote).where(Vote.queue_item_id == item.id, Vote.voter_id == vid)
-    )
-    existing_vote = result.scalar_one_or_none()
-
-    if existing_vote:
-        if existing_vote.vote_type == "down":
-            # Remove downvote (toggle off)
-            await db.delete(existing_vote)
-            item.vote_count += 1  # undo the -1
-            await db.commit()
-            response.set_cookie(key="voter_id", value=vid, max_age=60*60*24*30, httponly=True, samesite="lax")
-            return {"status": "undownvoted", "track_id": body.track_id, "vote_count": item.vote_count}
-        else:
-            # Was an upvote, switch to downvote
-            existing_vote.vote_type = "down"
-            item.vote_count -= 2  # remove +1 and add -1
-            await db.commit()
-            response.set_cookie(key="voter_id", value=vid, max_age=60*60*24*30, httponly=True, samesite="lax")
-            return {"status": "downvoted", "track_id": body.track_id, "vote_count": item.vote_count}
-
-    # Add downvote
-    vote = Vote(queue_item_id=item.id, voter_id=vid, vote_type="down")
-    db.add(vote)
-    item.vote_count -= 1
-    await db.commit()
-
-    response.set_cookie(
-        key="voter_id",
-        value=vid,
-        max_age=60 * 60 * 24 * 30,
-        httponly=True,
-        samesite="lax",
-    )
-
-    return {"status": "downvoted", "track_id": body.track_id, "vote_count": item.vote_count}
+    return await _apply_vote(code, body.track_id, "down", response, db, voter_id)
 
 
 @router.get("/queue", response_model=QueueResponse)
@@ -406,66 +411,43 @@ async def get_queue(
     voter_id: str | None = Cookie(default=None),
 ):
     """Get the current queue state: now playing + sorted pending tracks."""
+    from app.schemas import UpNextResponse
+
     space, owner = await _get_space_with_owner(code, db)
 
-    # Get now playing from Spotify
+    playback, spotify_queue_raw = await _get_playback_and_queue(space, owner, db)
     now_playing = None
-    sp = None
-    try:
-        sp = await get_spotify_client_for_user(owner, db)
-        playback = sp.current_playback()
-        if playback and playback.get("item"):
-            track = playback["item"]
-            now_playing = NowPlayingResponse(
-                track_id=track["id"],
-                name=track["name"],
-                artist=", ".join(a["name"] for a in track["artists"]),
-                album_art=track["album"]["images"][0]["url"] if track["album"]["images"] else None,
-                duration_ms=track["duration_ms"],
-                progress_ms=playback.get("progress_ms", 0),
-                is_playing=playback.get("is_playing", False),
-            )
-    except Exception as e:
-        import logging
-        logging.warning(f"Spotify playback fetch failed for space {code}: {type(e).__name__}")
+    if playback and playback.get("item"):
+        track = playback["item"]
+        now_playing = NowPlayingResponse(
+            track_id=track["id"],
+            name=track["name"],
+            artist=", ".join(a["name"] for a in track["artists"]),
+            album_art=track["album"]["images"][0]["url"] if track["album"]["images"] else None,
+            duration_ms=track["duration_ms"],
+            progress_ms=playback.get("progress_ms", 0),
+            is_playing=playback.get("is_playing", False),
+        )
 
-    # Fetch Spotify's upcoming queue
-    from app.schemas import UpNextResponse
-    spotify_queue_track_ids = set()
-    spotify_queue_raw = []
-    if sp:
-        try:
-            spotify_queue_data = sp.queue()
-            if spotify_queue_data and spotify_queue_data.get("queue"):
-                spotify_queue_raw = spotify_queue_data["queue"][:20]
-                spotify_queue_track_ids = {t["id"] for t in spotify_queue_raw}
-        except Exception:
-            pass
-
-    # Get the "up next" track - only show truly "queued" (locked-in) items
-    # Verify the item is still in Spotify's queue (not already played/skipped)
+    # Read-only: the worker owns the on-deck item's lifecycle. Deleting it here
+    # raced with Spotify's eventually-consistent queue and made "Up next" flap.
     up_next = None
     up_next_result = await db.execute(
         select(QueueItem)
         .where(QueueItem.space_id == space.id, QueueItem.status == "queued")
+        .order_by(QueueItem.created_at.desc())
         .limit(1)
     )
     up_next_item = up_next_result.scalar_one_or_none()
     if up_next_item:
-        if up_next_item.track_id in spotify_queue_track_ids:
-            # Still in Spotify's queue — show it
-            up_next = UpNextResponse(
-                track_id=up_next_item.track_id,
-                name=up_next_item.name,
-                artist=up_next_item.artist,
-                album_art=up_next_item.album_art,
-                duration_ms=up_next_item.duration_ms,
-                vote_count=up_next_item.vote_count,
-            )
-        else:
-            # Already played or skipped — remove the stale entry
-            await db.delete(up_next_item)
-            await db.commit()
+        up_next = UpNextResponse(
+            track_id=up_next_item.track_id,
+            name=up_next_item.name,
+            artist=up_next_item.artist,
+            album_art=up_next_item.album_art,
+            duration_ms=up_next_item.duration_ms,
+            vote_count=up_next_item.vote_count,
+        )
 
     # Get sorted pending queue items
     result = await db.execute(
@@ -487,14 +469,8 @@ async def get_queue(
         existing_track_ids.add(item.track_id)
 
     for t in spotify_queue_raw:
-        if t["id"] not in existing_track_ids:
-            spotify_queue_items.append(SearchResult(
-                track_id=t["id"],
-                name=t["name"],
-                artist=", ".join(a["name"] for a in t["artists"]),
-                album_art=t["album"]["images"][0]["url"] if t["album"]["images"] else "",
-                duration_ms=t["duration_ms"],
-            ))
+        if t and t.get("id") and t["id"] not in existing_track_ids:
+            spotify_queue_items.append(_to_search_result(t))
             if len(spotify_queue_items) >= 8:
                 break
 

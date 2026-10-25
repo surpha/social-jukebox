@@ -1,7 +1,9 @@
+import asyncio
 from datetime import datetime, timezone
 
 import spotipy
 from cryptography.fernet import Fernet
+from spotipy.cache_handler import MemoryCacheHandler
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -32,14 +34,26 @@ def _decrypt(value: str) -> str:
     return _fernet.decrypt(value.encode()).decode()
 
 
+SPOTIFY_TIMEOUT = 8
+
+
 def _get_oauth_manager() -> spotipy.SpotifyOAuth:
+    # Per-request memory cache: the default file cache (.cache) is shared by all users.
     return spotipy.SpotifyOAuth(
         client_id=settings.spotify_client_id,
         client_secret=settings.spotify_client_secret,
         redirect_uri=settings.spotify_redirect_uri,
         scope=SPOTIFY_SCOPES,
         show_dialog=True,
+        cache_handler=MemoryCacheHandler(),
+        open_browser=False,
+        requests_timeout=SPOTIFY_TIMEOUT,
     )
+
+
+async def spotify_call(fn, *args, **kwargs):
+    """Run a blocking spotipy call in a thread so it doesn't stall the event loop."""
+    return await asyncio.to_thread(fn, *args, **kwargs)
 
 
 def get_spotify_client(user: User) -> spotipy.Spotify | None:
@@ -61,12 +75,14 @@ def get_spotify_client(user: User) -> spotipy.Spotify | None:
         # We'll update the DB in the calling context if needed
         user._refreshed_token = new_token  # Attach for caller to persist
 
-    return spotipy.Spotify(auth=token_info["access_token"])
+    return spotipy.Spotify(
+        auth=token_info["access_token"], requests_timeout=SPOTIFY_TIMEOUT, retries=1
+    )
 
 
 async def get_spotify_client_for_user(user: User, db: AsyncSession) -> spotipy.Spotify:
     """Get Spotify client and persist any refreshed tokens."""
-    sp = get_spotify_client(user)
+    sp = await spotify_call(get_spotify_client, user)
     if sp is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Spotify not linked")
 
@@ -99,7 +115,7 @@ async def spotify_callback(
 ):
     """Handles Spotify OAuth callback, stores encrypted tokens."""
     oauth = _get_oauth_manager()
-    token_info = oauth.get_access_token(code, as_dict=True)
+    token_info = await spotify_call(oauth.get_access_token, code, as_dict=True, check_cache=False)
 
     if not token_info or "access_token" not in token_info:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Failed to get Spotify token")
@@ -146,7 +162,7 @@ async def playback_play(
     """Resume playback."""
     sp = await get_spotify_client_for_user(current_user, db)
     try:
-        sp.start_playback()
+        await spotify_call(sp.start_playback)
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
     return {"status": "playing"}
@@ -160,7 +176,7 @@ async def playback_pause(
     """Pause playback."""
     sp = await get_spotify_client_for_user(current_user, db)
     try:
-        sp.pause_playback()
+        await spotify_call(sp.pause_playback)
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
     return {"status": "paused"}
@@ -174,7 +190,7 @@ async def playback_skip(
     """Skip to next track."""
     sp = await get_spotify_client_for_user(current_user, db)
     try:
-        sp.next_track()
+        await spotify_call(sp.next_track)
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
     return {"status": "skipped"}
@@ -188,7 +204,7 @@ async def playback_now_playing(
     """Get current playback state for owner dashboard."""
     sp = await get_spotify_client_for_user(current_user, db)
     try:
-        playback = sp.current_playback()
+        playback = await spotify_call(sp.current_playback)
         if not playback or not playback.get("item"):
             return {"is_playing": False}
         item = playback["item"]
@@ -212,7 +228,7 @@ async def playback_queue(
     """Get Spotify's actual queue (next tracks lined up)."""
     sp = await get_spotify_client_for_user(current_user, db)
     try:
-        queue_data = sp.queue()
+        queue_data = await spotify_call(sp.queue)
         tracks = queue_data.get("queue", [])[:10]
         return [
             {
