@@ -3,11 +3,13 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from app.config import get_settings
 from app.database import init_db
+from app.engine import engine_manager
 from app.routers import auth_routes, pages, queue, spaces, spotify
-from app.worker import worker_manager
+from app.spotify_client import close_http
 
 settings = get_settings()
 logging.basicConfig(level=logging.INFO)
@@ -16,41 +18,36 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Startup and shutdown events."""
-    # Startup
     logger.info("Initializing database...")
     await init_db()
-    logger.info("Database initialized.")
-
-    logger.info("Restarting active workers...")
-    await worker_manager.restart_active_workers()
+    await engine_manager.restart_active()
 
     yield
 
-    # Shutdown
-    logger.info("Stopping all workers...")
-    await worker_manager.stop_all()
+    await engine_manager.stop_all()
+    await close_http()
     logger.info("Shutdown complete.")
 
 
-app = FastAPI(
-    title=settings.app_name,
-    version="1.0.0",
-    lifespan=lifespan,
-)
+app = FastAPI(title=settings.app_name, version="2.0.0", lifespan=lifespan)
 
-# CORS — allow all origins for MVP (guests on different devices)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[settings.app_url.rstrip("/")],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Include routers
+app.mount("/static", StaticFiles(directory="app/static"), name="static")
 app.include_router(pages.router)
 app.include_router(auth_routes.router)
 app.include_router(spotify.router)
 app.include_router(spaces.router)
 app.include_router(queue.router)
+
+
+@app.api_route("/health", methods=["GET", "HEAD"])
+async def health():
+    """Liveness probe for Render and uptime pingers."""
+    return {"status": "ok"}

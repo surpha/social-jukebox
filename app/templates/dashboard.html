@@ -5,34 +5,17 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Dashboard — Social Jukebox</title>
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='50' fill='%231DB954'/%3E%3Cpath d='M70 47.5c-8-4.8-20-5.2-27.2-2.9-1.2.4-2.4-.3-2.7-1.4-.4-1.2.3-2.4 1.4-2.7 8.3-2.6 22-2.1 30.7 3.3 1 .6 1.4 2 .7 3.1-.6 1-2 1.3-3 .7zm-.7 8.5c-.5.8-1.6 1.1-2.4.6-6.6-4.1-16.7-5.3-24.6-2.9-1 .3-2-.2-2.3-1.2-.3-1 .2-2 1.2-2.3 9-2.7 20.2-1.4 27.9 3.3.8.5 1.1 1.6.6 2.5zm-2.7 8.2c-.4.7-1.3.9-2 .5-5.8-3.5-13-4.3-21.6-2.4-.8.2-1.6-.3-1.8-1.1-.2-.8.3-1.6 1.1-1.8 9.4-2.1 17.4-1.2 24 2.7.7.4.9 1.3.5 2z' fill='white'/%3E%3C/svg%3E">
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
-    <script>
-        tailwind.config = {
-            theme: {
-                extend: {
-                    colors: {
-                        'sp-green': '#1DB954',
-                        'sp-green-hover': '#1ed760',
-                        'sp-black': '#121212',
-                        'sp-dark': '#181818',
-                        'sp-card': '#282828',
-                        'sp-light': '#b3b3b3',
-                        'sp-white': '#ffffff',
-                    },
-                    fontFamily: { 'sans': ['Inter', 'system-ui', 'sans-serif'] }
-                }
-            }
-        }
-    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/app.css">
     <style>
         body { background-color: #121212; }
-        .toggle-active { background-color: #1DB954; }
-        .toggle-inactive { background-color: #535353; }
         .fade-in { animation: fadeIn 0.3s ease-in; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
         @keyframes pulse-green { 0%, 100% { box-shadow: 0 0 0 0 rgba(29, 185, 84, 0.4); } 70% { box-shadow: 0 0 0 8px rgba(29, 185, 84, 0); } }
         .pulse-dot { animation: pulse-green 2s infinite; }
+        .progress-bar { transition: width 1s linear; }
     </style>
 </head>
 <body class="font-sans text-sp-white min-h-screen">
@@ -88,9 +71,7 @@
         </div>
 
         <!-- Spaces Grid -->
-        <div id="spacesGrid" class="grid md:grid-cols-2 lg:grid-cols-3 gap-5">
-            <!-- Populated by JS -->
-        </div>
+        <div id="spacesGrid" class="grid md:grid-cols-2 lg:grid-cols-3 gap-5"></div>
 
         <!-- Empty State -->
         <div id="emptyState" class="hidden text-center py-20">
@@ -110,7 +91,7 @@
             <h2 class="text-2xl font-bold mb-6">Create a Music Space</h2>
             <form onsubmit="createSpace(event)">
                 <label class="text-sm text-sp-light block mb-2">Space Name</label>
-                <input type="text" id="spaceName" placeholder="e.g. Downtown Gym, Coffee Corner" required
+                <input type="text" id="spaceName" placeholder="e.g. Downtown Gym, Coffee Corner" required maxlength="100"
                     class="w-full px-4 py-3 bg-sp-card border border-white/10 rounded-lg text-white placeholder-sp-light mb-6">
                 <div class="flex gap-3">
                     <button type="button" onclick="closeCreateModal()" class="flex-1 py-3 border border-white/10 rounded-full font-semibold hover:bg-sp-card transition-colors">Cancel</button>
@@ -142,7 +123,7 @@
             <!-- Header -->
             <div class="flex items-center justify-between mb-6">
                 <div class="flex items-center gap-3">
-                    <button onclick="closeMasterView()" class="w-9 h-9 rounded-full bg-sp-card flex items-center justify-center hover:bg-sp-hover transition-colors">
+                    <button onclick="closeMasterView()" class="w-9 h-9 rounded-full bg-sp-card flex items-center justify-center hover:bg-sp-hover transition-colors" aria-label="Back">
                         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
                     </button>
                     <div>
@@ -151,8 +132,8 @@
                     </div>
                 </div>
                 <div class="flex items-center gap-1.5">
-                    <span class="w-2 h-2 bg-sp-green rounded-full animate-pulse"></span>
-                    <span class="text-xs text-sp-green font-medium">Live</span>
+                    <span id="masterLiveDot" class="w-2 h-2 bg-sp-green rounded-full animate-pulse"></span>
+                    <span id="masterLiveText" class="text-xs text-sp-green font-medium">Live</span>
                 </div>
             </div>
 
@@ -162,17 +143,16 @@
                     <span class="text-xs font-semibold text-sp-green uppercase tracking-wider">Now Playing</span>
                 </div>
                 <div class="flex items-center gap-4 mb-5">
-                    <div id="masterNpArt" class="w-20 h-20 rounded-lg bg-sp-card flex-shrink-0 overflow-hidden shadow-lg">
-                        <div class="w-full h-full bg-sp-card flex items-center justify-center">
-                            <svg class="w-10 h-10 text-sp-light/30" fill="currentColor" viewBox="0 0 24 24"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>
-                        </div>
+                    <div class="w-20 h-20 rounded-lg bg-sp-card flex-shrink-0 overflow-hidden shadow-lg flex items-center justify-center">
+                        <img id="masterNpImg" alt="" class="w-full h-full object-cover hidden">
+                        <svg id="masterNpPlaceholder" class="w-10 h-10 text-sp-light/30" fill="currentColor" viewBox="0 0 24 24"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>
                     </div>
                     <div class="flex-1 min-w-0">
                         <p id="masterNpTitle" class="font-bold text-base truncate text-sp-light">Nothing playing</p>
                         <p id="masterNpArtist" class="text-sm text-sp-light/70 truncate mt-0.5">Waiting for music...</p>
                         <div class="mt-3">
                             <div class="w-full h-1.5 bg-white/10 rounded-full overflow-hidden">
-                                <div id="masterNpProgress" class="h-full bg-sp-green rounded-full transition-all duration-1000" style="width: 0%"></div>
+                                <div id="masterNpProgress" class="progress-bar h-full bg-sp-green rounded-full" style="width: 0%"></div>
                             </div>
                             <div class="flex justify-between mt-1">
                                 <span id="masterNpElapsed" class="text-[10px] text-sp-light/50">0:00</span>
@@ -203,10 +183,10 @@
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
                     </svg>
                     <h3 class="text-base font-bold">Up Next</h3>
-                    <span class="text-[10px] text-sp-light bg-sp-green/10 text-sp-green px-2 py-0.5 rounded-full font-semibold uppercase">Locked</span>
+                    <span class="text-[10px] bg-sp-green/10 text-sp-green px-2 py-0.5 rounded-full font-semibold uppercase">Locked</span>
                 </div>
-                <div id="masterUpNextCard" class="flex items-center gap-3 p-3 rounded-xl bg-sp-green/5 border border-sp-green/20">
-                    <img id="masterUnArt" src="" alt="" class="w-12 h-12 rounded object-cover flex-shrink-0 shadow">
+                <div class="flex items-center gap-3 p-3 rounded-xl bg-sp-green/5 border border-sp-green/20">
+                    <img id="masterUnArt" alt="" class="w-12 h-12 rounded object-cover flex-shrink-0 shadow">
                     <div class="flex-1 min-w-0">
                         <p id="masterUnTitle" class="text-sm font-semibold truncate"></p>
                         <p id="masterUnArtist" class="text-xs text-sp-light truncate mt-0.5"></p>
@@ -226,9 +206,9 @@
                     <svg class="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-sp-light" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
                     </svg>
-                    <input type="text" id="masterSearchInput" placeholder="Search and add songs..."
+                    <input type="text" id="masterSearchInput" placeholder="Search and add songs..." autocomplete="off"
                         class="w-full pl-11 pr-4 py-3 bg-sp-card border border-white/5 rounded-full text-sm text-white placeholder-sp-light/70 focus:border-sp-green/50 focus:outline-none transition-colors">
-                    <button id="masterClearSearch" onclick="masterClearSearch()" class="absolute right-4 top-1/2 -translate-y-1/2 text-sp-light hover:text-white hidden">
+                    <button id="masterClearSearch" onclick="masterClearSearch()" class="absolute right-4 top-1/2 -translate-y-1/2 text-sp-light hover:text-white hidden" aria-label="Clear search">
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
                         </svg>
@@ -243,8 +223,7 @@
                     <h3 class="text-base font-bold">Queue</h3>
                     <span id="masterQueueCount" class="text-xs text-sp-light bg-sp-card px-2.5 py-1 rounded-full">0 songs</span>
                 </div>
-                <div id="masterQueueList" class="space-y-2">
-                </div>
+                <div id="masterQueueList" class="space-y-2"></div>
                 <div id="masterQueueEmpty" class="text-center py-8">
                     <p class="text-sp-light text-sm">No songs in queue</p>
                     <p class="text-sp-light/50 text-xs mt-1">Search above or share the QR code with guests</p>
@@ -253,11 +232,9 @@
 
             <!-- Spotify Queue -->
             <section id="masterSpotifyQueueSection" class="hidden mb-5">
-                <div class="flex items-center justify-between mb-3">
-                    <div class="flex items-center gap-2">
-                        <svg class="w-4 h-4 text-sp-green" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z"/></svg>
-                        <h3 class="text-base font-bold">Coming Up on Spotify</h3>
-                    </div>
+                <div class="flex items-center gap-2 mb-3">
+                    <svg class="w-4 h-4 text-sp-green" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z"/></svg>
+                    <h3 class="text-base font-bold">Coming Up on Spotify</h3>
                 </div>
                 <p class="text-xs text-sp-light/60 -mt-1 mb-3">From Spotify's queue • tap + to add to SJ queue</p>
                 <div id="masterSpotifyQueueList" class="space-y-1"></div>
@@ -265,12 +242,9 @@
 
             <!-- Recommendations -->
             <section id="masterRecsSection" class="hidden mb-8">
-                <div class="flex items-center justify-between mb-3">
-                    <div class="flex items-center gap-2">
-                        <svg class="w-4 h-4 text-sp-green" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
-                        <h3 class="text-base font-bold">Suggested For You</h3>
-                    </div>
-                    <button onclick="loadMasterRecs(true)" class="text-xs text-sp-green hover:text-sp-green-hover font-medium">Refresh</button>
+                <div class="flex items-center gap-2 mb-3">
+                    <svg class="w-4 h-4 text-sp-green" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
+                    <h3 class="text-base font-bold">Suggested For You</h3>
                 </div>
                 <p class="text-xs text-sp-light/60 -mt-1 mb-3">Based on what's playing • tap + to add</p>
                 <div id="masterRecsList" class="space-y-1"></div>
@@ -278,61 +252,57 @@
         </div>
     </div>
 
+    <!-- Toast -->
+    <div id="toast" class="fixed bottom-6 left-1/2 -translate-x-1/2 z-[200] hidden">
+        <div class="bg-sp-green text-sp-black px-5 py-2.5 rounded-full font-semibold text-sm shadow-lg shadow-sp-green/20">
+            <span id="toastText"></span>
+        </div>
+    </div>
+
+    <script src="/static/live.js"></script>
     <script>
     const API = '';
+    const $ = (id) => document.getElementById(id);
+    const { esc, toast, trackRow, renderTrackList, QueueView, NowPlaying } = Live;
 
-    // Handle token from Spotify OAuth redirect
-    const urlParams = new URLSearchParams(window.location.search);
-    const urlToken = urlParams.get('token');
-    if (urlToken) {
-        localStorage.setItem('token', urlToken);
-        // Clean URL
-        window.history.replaceState({}, document.title, '/dashboard' + (urlParams.get('spotify') ? '?spotify=linked' : ''));
+    // Token arrives in the URL fragment after Spotify login.
+    const hashToken = new URLSearchParams(location.hash.slice(1)).get('token');
+    if (hashToken) {
+        localStorage.setItem('token', hashToken);
+        history.replaceState({}, document.title, '/dashboard');
     }
 
     const token = localStorage.getItem('token');
-
     if (!token) window.location.href = '/';
 
     const headers = { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' };
 
-    // Load user & spaces on page load
     async function init() {
         try {
             const [userRes, spotifyRes] = await Promise.all([
                 fetch(API + '/api/auth/me', { headers }),
                 fetch(API + '/api/spotify/status', { headers }),
             ]);
-
             if (!userRes.ok) { logout(); return; }
 
             const user = await userRes.json();
             const spotify = await spotifyRes.json();
+            $('userName').textContent = user.name;
+            $('spotifyBanner').classList.remove('hidden');
 
-            document.getElementById('userName').textContent = user.name;
-            
-            // Show Spotify banner
-            const banner = document.getElementById('spotifyBanner');
-            banner.classList.remove('hidden');
-            
             if (spotify.linked) {
-                document.getElementById('spotifyStatusText').textContent = 'Spotify Connected';
-                document.getElementById('spotifySubText').textContent = 'Your Spotify Premium is linked and ready';
-                document.getElementById('spotifyBtn').textContent = 'Reconnect';
-                document.getElementById('spotifyBtn').classList.remove('bg-sp-green');
-                document.getElementById('spotifyBtn').classList.add('bg-sp-card', 'text-white', 'border', 'border-white/10');
-                document.getElementById('createBtn').disabled = false;
+                $('spotifyStatusText').textContent = 'Spotify Connected';
+                $('spotifySubText').textContent = 'Your Spotify Premium is linked and ready';
+                $('spotifyBtn').textContent = 'Reconnect';
+                $('spotifyBtn').classList.remove('bg-sp-green');
+                $('spotifyBtn').classList.add('bg-sp-card', 'text-white', 'border', 'border-white/10');
+                $('createBtn').disabled = false;
             } else {
-                document.getElementById('createBtn').disabled = true;
+                $('createBtn').disabled = true;
             }
 
+            if (location.search) history.replaceState({}, document.title, '/dashboard');
             await loadSpaces();
-
-            // Check for spotify=linked callback
-            if (window.location.search.includes('spotify=linked')) {
-                window.history.replaceState({}, '', '/dashboard');
-                location.reload();
-            }
         } catch (err) {
             console.error(err);
         }
@@ -341,44 +311,58 @@
     async function loadSpaces() {
         const res = await fetch(API + '/api/spaces', { headers });
         const spaces = await res.json();
-        const grid = document.getElementById('spacesGrid');
-        const empty = document.getElementById('emptyState');
+        const grid = $('spacesGrid');
 
         if (spaces.length === 0) {
             grid.innerHTML = '';
-            empty.classList.remove('hidden');
+            $('emptyState').classList.remove('hidden');
             return;
         }
 
-        empty.classList.add('hidden');
-        grid.innerHTML = spaces.map(space => `
+        $('emptyState').classList.add('hidden');
+        grid.innerHTML = spaces.map(space => {
+            const code = esc(space.code);
+            return `
             <div class="bg-sp-dark rounded-2xl p-6 border border-white/5 hover:border-white/10 transition-all fade-in">
                 <div class="flex items-start justify-between mb-4">
                     <div>
-                        <h3 class="font-semibold text-lg">${escHtml(space.name)}</h3>
-                        <p class="text-sp-light text-sm font-mono mt-1">Code: ${space.code}</p>
+                        <h3 class="font-semibold text-lg">${esc(space.name)}</h3>
+                        <p class="text-sp-light text-sm font-mono mt-1">Code: ${code}</p>
                     </div>
                     <div class="flex items-center gap-2">
                         ${space.is_active ? '<span class="w-2.5 h-2.5 bg-sp-green rounded-full pulse-dot"></span><span class="text-sp-green text-xs font-medium">Live</span>' : '<span class="w-2.5 h-2.5 bg-sp-light/50 rounded-full"></span><span class="text-sp-light text-xs">Inactive</span>'}
                     </div>
                 </div>
                 <div class="flex flex-wrap gap-2 mt-4">
-                    <button onclick="openMasterView('${space.code}', '${escHtml(space.name)}')" class="px-4 py-2 text-xs font-semibold rounded-full bg-sp-green/10 text-sp-green hover:bg-sp-green/20 border border-sp-green/20 transition-colors ${space.is_active ? '' : 'hidden'}">
+                    <button data-space-action="manage" data-code="${code}" data-name="${esc(space.name)}" class="px-4 py-2 text-xs font-semibold rounded-full bg-sp-green/10 text-sp-green hover:bg-sp-green/20 border border-sp-green/20 transition-colors ${space.is_active ? '' : 'hidden'}">
                         Manage
                     </button>
-                    <button onclick="toggleSpace('${space.code}', ${space.is_active})" class="px-4 py-2 text-xs font-semibold rounded-full transition-colors ${space.is_active ? 'bg-red-500/10 text-red-400 hover:bg-red-500/20 border border-red-500/20' : 'bg-sp-green/10 text-sp-green hover:bg-sp-green/20 border border-sp-green/20'}">
+                    <button data-space-action="${space.is_active ? 'deactivate' : 'activate'}" data-code="${code}" class="px-4 py-2 text-xs font-semibold rounded-full transition-colors ${space.is_active ? 'bg-red-500/10 text-red-400 hover:bg-red-500/20 border border-red-500/20' : 'bg-sp-green/10 text-sp-green hover:bg-sp-green/20 border border-sp-green/20'}">
                         ${space.is_active ? 'Deactivate' : 'Activate'}
                     </button>
-                    <button onclick="showQr('${space.code}')" class="px-4 py-2 text-xs font-semibold rounded-full bg-sp-card text-white hover:bg-white/10 border border-white/10 transition-colors">
+                    <button data-space-action="qr" data-code="${code}" class="px-4 py-2 text-xs font-semibold rounded-full bg-sp-card text-white hover:bg-white/10 border border-white/10 transition-colors">
                         QR Code
                     </button>
-                    <button onclick="deleteSpace('${space.code}')" class="px-4 py-2 text-xs font-semibold rounded-full text-sp-light hover:text-red-400 hover:bg-red-500/10 transition-colors">
+                    <button data-space-action="delete" data-code="${code}" class="px-4 py-2 text-xs font-semibold rounded-full text-sp-light hover:text-red-400 hover:bg-red-500/10 transition-colors">
                         Delete
                     </button>
                 </div>
-            </div>
-        `).join('');
+            </div>`;
+        }).join('');
     }
+
+    $('spacesGrid').addEventListener('click', (e) => {
+        const btn = e.target.closest('[data-space-action]');
+        if (!btn) return;
+        const code = btn.dataset.code;
+        switch (btn.dataset.spaceAction) {
+            case 'manage': openMasterView(code, btn.dataset.name); break;
+            case 'activate': toggleSpace(code, 'activate', btn); break;
+            case 'deactivate': toggleSpace(code, 'deactivate', btn); break;
+            case 'qr': showQr(code); break;
+            case 'delete': deleteSpace(code); break;
+        }
+    });
 
     async function linkSpotify() {
         const res = await fetch(API + '/api/spotify/link', { headers });
@@ -387,30 +371,22 @@
     }
 
     function showCreateModal() {
-        document.getElementById('createModal').classList.remove('hidden');
-        document.getElementById('createModal').classList.add('flex');
-        document.getElementById('spaceName').focus();
+        $('createModal').classList.replace('hidden', 'flex');
+        $('spaceName').focus();
     }
 
     function closeCreateModal() {
-        document.getElementById('createModal').classList.add('hidden');
-        document.getElementById('createModal').classList.remove('flex');
+        $('createModal').classList.replace('flex', 'hidden');
     }
 
     async function createSpace(e) {
         e.preventDefault();
-        const name = document.getElementById('spaceName').value.trim();
+        const name = $('spaceName').value.trim();
         if (!name) return;
-
-        const res = await fetch(API + '/api/spaces', {
-            method: 'POST',
-            headers,
-            body: JSON.stringify({ name }),
-        });
-
+        const res = await fetch(API + '/api/spaces', { method: 'POST', headers, body: JSON.stringify({ name }) });
         if (res.ok) {
             closeCreateModal();
-            document.getElementById('spaceName').value = '';
+            $('spaceName').value = '';
             await loadSpaces();
         } else {
             const data = await res.json();
@@ -418,33 +394,34 @@
         }
     }
 
-    async function toggleSpace(code, isActive) {
-        const endpoint = isActive ? 'deactivate' : 'activate';
-        const res = await fetch(API + `/api/spaces/${code}/${endpoint}`, { method: 'PATCH', headers });
+    async function toggleSpace(code, endpoint, btn) {
+        btn.disabled = true;
+        btn.classList.add('opacity-50');
+        const res = await fetch(API + `/api/spaces/${encodeURIComponent(code)}/${endpoint}`, { method: 'PATCH', headers });
         if (res.ok) await loadSpaces();
         else {
-            const data = await res.json();
+            btn.disabled = false;
+            btn.classList.remove('opacity-50');
+            const data = await res.json().catch(() => ({}));
             alert(data.detail || 'Failed to toggle space');
         }
     }
 
     function showQr(code) {
-        const modal = document.getElementById('qrModal');
-        modal.classList.remove('hidden');
-        modal.classList.add('flex');
-        document.getElementById('qrImage').src = API + `/api/spaces/${code}/qr`;
-        document.getElementById('qrDownload').href = API + `/api/spaces/${code}/qr`;
-        document.getElementById('qrUrl').textContent = `${window.location.origin}/s/${code}`;
+        const url = API + `/api/spaces/${encodeURIComponent(code)}/qr`;
+        $('qrModal').classList.replace('hidden', 'flex');
+        $('qrImage').src = url;
+        $('qrDownload').href = url;
+        $('qrUrl').textContent = `${window.location.origin}/s/${code}`;
     }
 
     function closeQrModal() {
-        document.getElementById('qrModal').classList.add('hidden');
-        document.getElementById('qrModal').classList.remove('flex');
+        $('qrModal').classList.replace('flex', 'hidden');
     }
 
     async function deleteSpace(code) {
         if (!confirm('Delete this space? This cannot be undone.')) return;
-        const res = await fetch(API + `/api/spaces/${code}`, { method: 'DELETE', headers });
+        const res = await fetch(API + `/api/spaces/${encodeURIComponent(code)}`, { method: 'DELETE', headers });
         if (res.ok) await loadSpaces();
     }
 
@@ -453,315 +430,192 @@
         window.location.href = '/';
     }
 
-    function escHtml(str) {
-        const div = document.createElement('div');
-        div.textContent = str;
-        return div.innerHTML;
-    }
+    // --- Master View (live via SSE) ---
+    let masterCode = null;
+    let masterConn = null;
+    let masterState = null;
+    let masterVotes = {};
+    const masterKnown = new Map();
 
-    // --- Master View ---
-    let masterSpaceCode = null;
-    let masterInterval = null;
-    let masterProgress = 0;
-    let masterDuration = 0;
-    let masterPlaying = false;
-    let masterTrackId = null;
-    let masterProgressTicker = null;
-    let lastMasterSpotifyQueueFp = '';
-    let lastMasterQueueFp = '';
+    const masterNp = new NowPlaying({
+        img: $('masterNpImg'), placeholder: $('masterNpPlaceholder'), title: $('masterNpTitle'), artist: $('masterNpArtist'),
+        bar: $('masterNpProgress'), elapsed: $('masterNpElapsed'), duration: $('masterNpDuration'),
+    });
+
+    const masterQueue = new QueueView($('masterQueueList'), {
+        myVote: (id) => masterVotes[id] || null,
+        onVote: masterCastVote,
+        showDownvote: true,
+    });
+
+    const spaceApi = () => `/api/spaces/${encodeURIComponent(masterCode)}`;
 
     function openMasterView(code, name) {
-        masterSpaceCode = code;
-        document.getElementById('masterSpaceName').textContent = name;
-        document.getElementById('masterModal').classList.remove('hidden');
+        masterCode = code;
+        masterState = null;
+        masterVotes = {};
+        $('masterSpaceName').textContent = name;
+        $('masterModal').classList.remove('hidden');
         document.body.style.overflow = 'hidden';
-        loadMasterData();
-        masterInterval = setInterval(loadMasterData, 3000);
-        startMasterProgressTicker();
+        masterConn = Live.connect(`${spaceApi()}/events`, applyMasterState, (ok) => {
+            $('masterLiveText').textContent = ok ? 'Live' : 'Reconnecting…';
+        });
+        fetch(`${spaceApi()}/my-votes`).then(r => r.ok ? r.json() : {}).then(v => { masterVotes = v; renderMasterQueue(); }).catch(() => {});
     }
 
     function closeMasterView() {
-        document.getElementById('masterModal').classList.add('hidden');
+        $('masterModal').classList.add('hidden');
         document.body.style.overflow = '';
-        if (masterInterval) clearInterval(masterInterval);
-        if (masterProgressTicker) clearInterval(masterProgressTicker);
-        masterSpaceCode = null;
+        if (masterConn) masterConn.close();
+        masterConn = null;
+        masterCode = null;
     }
 
-    function startMasterProgressTicker() {
-        if (masterProgressTicker) clearInterval(masterProgressTicker);
-        masterProgressTicker = setInterval(() => {
-            if (!masterPlaying || masterDuration <= 0) return;
-            masterProgress = Math.min(masterProgress + 1000, masterDuration);
-            const pct = (masterProgress / masterDuration) * 100;
-            document.getElementById('masterNpProgress').style.width = `${pct}%`;
-            document.getElementById('masterNpElapsed').textContent = formatTime(masterProgress);
-        }, 1000);
+    function setPlayingButtons(playing) {
+        $('masterPlayBtn').classList.toggle('hidden', playing);
+        $('masterPauseBtn').classList.toggle('hidden', !playing);
     }
 
-    async function loadMasterData() {
-        if (!masterSpaceCode) return;
-        try {
-            // Single API call — /queue already includes now_playing from Spotify
-            const qRes = await fetch(`/api/spaces/${masterSpaceCode}/queue`);
-            if (!qRes.ok) return;
-            const data = await qRes.json();
+    function applyMasterState(data) {
+        if (data.deleted) { closeMasterView(); loadSpaces(); return; }
+        masterState = data;
+        $('masterLiveText').textContent = data.active ? 'Live' : 'Offline';
+        masterNp.update(data.now_playing);
+        setPlayingButtons(!!(data.now_playing && data.now_playing.is_playing));
 
-            // Update Now Playing from queue response
-            const np = data.now_playing;
-            if (np && (np.is_playing || np.name)) {
-                const trackChanged = masterTrackId !== (np.name + np.artist);
-                if (trackChanged) {
-                    masterTrackId = np.name + np.artist;
-                    document.getElementById('masterNpArt').innerHTML = np.album_art
-                        ? `<img src="${escHtml(np.album_art)}" class="w-full h-full object-cover">`
-                        : `<div class="w-full h-full bg-sp-card flex items-center justify-center"><svg class="w-10 h-10 text-sp-light/30" fill="currentColor" viewBox="0 0 24 24"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg></div>`;
-                    document.getElementById('masterNpTitle').textContent = np.name;
-                    document.getElementById('masterNpTitle').classList.remove('text-sp-light');
-                    document.getElementById('masterNpTitle').classList.add('text-white');
-                    document.getElementById('masterNpArtist').textContent = np.artist;
-                    document.getElementById('masterNpDuration').textContent = formatTime(np.duration_ms);
-                }
-                const drift = Math.abs(np.progress_ms - masterProgress);
-                if (trackChanged || drift > 3000) masterProgress = np.progress_ms;
-                masterDuration = np.duration_ms;
-                masterPlaying = np.is_playing;
-                const pct = masterDuration > 0 ? (masterProgress / masterDuration) * 100 : 0;
-                document.getElementById('masterNpProgress').style.width = `${pct}%`;
-                document.getElementById('masterNpElapsed').textContent = formatTime(masterProgress);
-
-                document.getElementById('masterPlayBtn').classList.toggle('hidden', np.is_playing);
-                document.getElementById('masterPauseBtn').classList.toggle('hidden', !np.is_playing);
-            } else {
-                masterPlaying = false;
-                document.getElementById('masterPlayBtn').classList.remove('hidden');
-                document.getElementById('masterPauseBtn').classList.add('hidden');
-            }
-
-            // Update queue
-            const list = document.getElementById('masterQueueList');
-            const empty = document.getElementById('masterQueueEmpty');
-            const count = document.getElementById('masterQueueCount');
-
-            // Up Next section (only update if changed)
-            const upNextSection = document.getElementById('masterUpNext');
-            const upNextId = data.up_next ? data.up_next.track_id + data.up_next.vote_count : '';
-            if (data.up_next) {
-                if (upNextSection.dataset.fp !== upNextId) {
-                    upNextSection.dataset.fp = upNextId;
-                    upNextSection.classList.remove('hidden');
-                    document.getElementById('masterUnArt').src = data.up_next.album_art;
-                    document.getElementById('masterUnTitle').textContent = data.up_next.name;
-                    document.getElementById('masterUnArtist').textContent = data.up_next.artist;
-                    document.getElementById('masterUnVotes').textContent = data.up_next.vote_count;
-                }
-            } else {
-                if (upNextSection.dataset.fp !== '') {
-                    upNextSection.dataset.fp = '';
-                    upNextSection.classList.add('hidden');
-                }
-            }
-
-            // Queue list (only rebuild if changed)
-            const queueFp = data.queue.map(i => `${i.track_id}:${i.vote_count}:${i.has_voted}`).join('|');
-            if (queueFp !== lastMasterQueueFp) {
-                lastMasterQueueFp = queueFp;
-                if (data.queue.length === 0) {
-                    list.innerHTML = '';
-                    empty.classList.remove('hidden');
-                    count.textContent = '0 songs';
-                } else {
-                    empty.classList.add('hidden');
-                    count.textContent = `${data.queue.length} song${data.queue.length > 1 ? 's' : ''}`;
-                    list.innerHTML = data.queue.map((item, i) => `
-                        <div class="flex items-center gap-3 p-3 rounded-xl bg-sp-dark border border-white/5">
-                            <span class="text-xs font-bold w-5 text-center flex-shrink-0 text-sp-light/50">${i + 1}</span>
-                            <img src="${escHtml(item.album_art)}" alt="" class="w-10 h-10 rounded object-cover flex-shrink-0 shadow">
-                            <div class="flex-1 min-w-0">
-                                <p class="text-sm font-medium truncate">${escHtml(item.name)}</p>
-                                <p class="text-xs text-sp-light truncate">${escHtml(item.artist)}</p>
-                            </div>
-                            <button onclick="masterVote('${item.track_id}', this)" data-track="${item.track_id}" data-voted="${item.has_voted}"
-                                class="flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-sm font-semibold transition-all flex-shrink-0 ${item.has_voted ? 'bg-sp-green/20 border-sp-green/50 text-sp-green' : 'border-white/10 text-sp-light hover:border-sp-green/50 hover:text-sp-green hover:bg-sp-green/10'}">
-                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 15l7-7 7 7"/></svg>
-                                <span>${item.vote_count}</span>
-                            </button>
-                        </div>
-                    `).join('');
-                }
-            }
-
-            // Spotify Queue section (server already filters out queued tracks)
-            renderSpotifyQueue(data.spotify_queue || []);
-
-            // Load recommendations
-            loadMasterRecs();
-        } catch (err) {
-            console.error('Master view error:', err);
+        const un = data.up_next;
+        $('masterUpNext').classList.toggle('hidden', !un);
+        if (un) {
+            if ($('masterUnArt').getAttribute('src') !== un.album_art) $('masterUnArt').src = un.album_art;
+            $('masterUnTitle').textContent = un.name;
+            $('masterUnArtist').textContent = un.artist;
+            $('masterUnVotes').textContent = un.vote_count;
         }
+
+        renderMasterQueue();
+        renderTrackList($('masterSpotifyQueueSection'), $('masterSpotifyQueueList'), data.spotify_queue, masterKnown);
+        const taken = new Set(data.queue.map(i => i.track_id));
+        if (un) taken.add(un.track_id);
+        if (data.now_playing) taken.add(data.now_playing.track_id);
+        renderTrackList($('masterRecsSection'), $('masterRecsList'), data.recommendations.filter(t => !taken.has(t.track_id)).slice(0, 5), masterKnown);
+    }
+
+    function renderMasterQueue() {
+        if (!masterState) return;
+        masterQueue.render(masterState.queue);
+        $('masterQueueEmpty').classList.toggle('hidden', masterState.queue.length > 0);
+        $('masterQueueCount').textContent = `${masterState.queue.length} song${masterState.queue.length === 1 ? '' : 's'}`;
     }
 
     async function controlPlayback(action) {
-        // Optimistic UI update — respond instantly
-        if (action === 'play') {
-            masterPlaying = true;
-            document.getElementById('masterPlayBtn').classList.add('hidden');
-            document.getElementById('masterPauseBtn').classList.remove('hidden');
-        } else if (action === 'pause') {
-            masterPlaying = false;
-            document.getElementById('masterPauseBtn').classList.add('hidden');
-            document.getElementById('masterPlayBtn').classList.remove('hidden');
-        } else if (action === 'skip') {
-            // Show loading state on progress bar
-            document.getElementById('masterNpProgress').style.width = '0%';
-            document.getElementById('masterNpElapsed').textContent = '0:00';
-            masterProgress = 0;
-        }
-
+        if (action === 'play') setPlayingButtons(true);
+        else if (action === 'pause') setPlayingButtons(false);
         try {
             const res = await fetch(API + `/api/spotify/playback/${action}`, { method: 'POST', headers });
-            if (res.ok) {
-                // Refresh data to sync actual state
-                setTimeout(loadMasterData, action === 'skip' ? 800 : 300);
-            } else {
-                // Revert optimistic update on failure
-                const data = await res.json();
-                alert(data.detail || `Failed to ${action}`);
-                loadMasterData();
+            if (!res.ok) {
+                const data = await res.json().catch(() => ({}));
+                toast(data.detail || `Failed to ${action}`);
+                if (masterState) setPlayingButtons(!!(masterState.now_playing && masterState.now_playing.is_playing));
             }
         } catch (err) {
-            alert('Network error');
-            loadMasterData();
+            toast('Network error');
         }
     }
 
-    async function masterVote(trackId, btn) {
-        const isVoted = btn.dataset.voted === 'true';
+    const voteValue = (v) => v === 'up' ? 1 : v === 'down' ? -1 : 0;
+    const masterInflight = new Set();
 
-        if (isVoted) {
-            btn.dataset.voted = 'false';
-            btn.classList.remove('bg-sp-green/20', 'border-sp-green/50', 'text-sp-green');
-            btn.classList.add('border-white/10', 'text-sp-light', 'hover:border-sp-green/50', 'hover:text-sp-green', 'hover:bg-sp-green/10');
-            const countEl = btn.querySelector('span');
-            if (countEl) countEl.textContent = Math.max(0, parseInt(countEl.textContent) - 1);
-        } else {
-            btn.dataset.voted = 'true';
-            btn.classList.remove('border-white/10', 'text-sp-light', 'hover:border-sp-green/50', 'hover:text-sp-green', 'hover:bg-sp-green/10');
-            btn.classList.add('bg-sp-green/20', 'border-sp-green/50', 'text-sp-green');
-            const countEl = btn.querySelector('span');
-            if (countEl) countEl.textContent = parseInt(countEl.textContent) + 1;
-        }
-
+    async function masterCastVote(trackId, direction) {
+        if (masterInflight.has(trackId) || !masterState) return;
+        const item = masterState.queue.find(i => i.track_id === trackId);
+        if (!item) return;
+        const prev = masterVotes[trackId] || null;
+        const next = prev === direction ? null : direction;
+        const apply = (vote, count) => {
+            if (vote) masterVotes[trackId] = vote; else delete masterVotes[trackId];
+            item.vote_count = count;
+            masterState.queue.sort((a, b) => b.vote_count - a.vote_count);
+            renderMasterQueue();
+        };
+        const prevCount = item.vote_count;
+        apply(next, prevCount + voteValue(next) - voteValue(prev));
+        masterInflight.add(trackId);
         try {
-            const res = await fetch(`/api/spaces/${masterSpaceCode}/vote`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+            const res = await fetch(`${spaceApi()}/${direction === 'up' ? 'vote' : 'downvote'}`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ track_id: trackId }),
             });
-            if (!res.ok) {
-                loadMasterData();
-            }
+            if (!res.ok) throw new Error(res.status);
+            const data = await res.json();
+            apply(data.my_vote, data.vote_count);
         } catch (err) {
-            console.error('Vote error:', err);
-            loadMasterData();
+            apply(prev, prevCount);
+            toast('Vote failed — try again');
+        } finally {
+            masterInflight.delete(trackId);
         }
     }
 
-    function renderSpotifyQueue(tracks) {
-        const fp = (tracks || []).map(t => t.track_id).join('|');
-        if (fp === lastMasterSpotifyQueueFp) return;
-        lastMasterSpotifyQueueFp = fp;
-
-        const section = document.getElementById('masterSpotifyQueueSection');
-        const list = document.getElementById('masterSpotifyQueueList');
-        if (tracks && tracks.length > 0) {
-            section.classList.remove('hidden');
-            list.innerHTML = tracks.map(t => `
-                <div class="flex items-center gap-3 p-2.5 rounded-lg hover:bg-sp-card/80 transition-colors">
-                    <img src="${escHtml(t.album_art)}" alt="" class="w-10 h-10 rounded object-cover flex-shrink-0">
-                    <div class="flex-1 min-w-0">
-                        <p class="text-sm font-medium truncate">${escHtml(t.name)}</p>
-                        <p class="text-xs text-sp-light truncate">${escHtml(t.artist)}</p>
-                    </div>
-                    <button onclick="masterQuickAdd(${escAttr(JSON.stringify(t))}, this)" class="w-8 h-8 rounded-full bg-sp-green text-sp-black flex items-center justify-center flex-shrink-0 hover:scale-110 active:scale-95 transition-transform shadow-sm">
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 4v16m8-8H4"/>
-                        </svg>
-                    </button>
-                </div>
-            `).join('');
-        } else {
-            section.classList.add('hidden');
-        }
-    }
-
-    async function masterQuickAdd(track, btn) {
+    async function masterAddTrack(trackId, btn) {
+        if (!masterCode) return;
         btn.disabled = true;
-        btn.innerHTML = '<svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>';
+        btn.classList.add('opacity-50');
         try {
-            const res = await fetch(`/api/spaces/${masterSpaceCode}/add`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(track),
+            const res = await fetch(`${spaceApi()}/add`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ track_id: trackId }),
             });
             if (res.ok) {
-                btn.innerHTML = '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>';
-                btn.classList.remove('bg-sp-green', 'text-sp-black');
-                btn.classList.add('bg-sp-green/20', 'text-sp-green');
-                // Reset fingerprints so lists refresh properly
-                lastMasterQueueFp = '';
-                lastMasterSpotifyQueueFp = '';
-                loadMasterData();
+                masterVotes[trackId] = 'up';
+                const t = masterKnown.get(trackId);
+                if (t && masterState && !masterState.queue.some(i => i.track_id === trackId)) {
+                    masterState.queue.push({ ...t, id: trackId, vote_count: 1 });
+                    renderMasterQueue();
+                }
+                toast('Added to queue!');
             } else if (res.status === 409) {
-                btn.innerHTML = '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>';
-                btn.classList.remove('bg-sp-green', 'text-sp-black');
-                btn.classList.add('bg-sp-card', 'text-sp-light');
+                toast('Already in queue');
             } else {
-                btn.innerHTML = '!';
+                const data = await res.json().catch(() => ({}));
+                toast(data.detail || 'Failed to add');
             }
         } catch (err) {
-            btn.innerHTML = '!';
+            toast('Network error');
+        } finally {
+            btn.disabled = false;
+            btn.classList.remove('opacity-50');
         }
     }
 
-    // --- Master Search ---
-    let masterSearchTimeout;
-    const masterSearchInput = document.getElementById('masterSearchInput');
-    const masterSearchResults = document.getElementById('masterSearchResults');
-    const masterClearBtn = document.getElementById('masterClearSearch');
-
-    masterSearchInput.addEventListener('input', (e) => {
-        const q = e.target.value.trim();
-        masterClearBtn.classList.toggle('hidden', !q);
-        clearTimeout(masterSearchTimeout);
-        if (q.length < 2) { masterSearchResults.classList.add('hidden'); return; }
-        masterSearchTimeout = setTimeout(() => masterSearch(q), 300);
+    $('masterModal').addEventListener('click', (e) => {
+        const add = e.target.closest('[data-add]');
+        if (add) masterAddTrack(add.dataset.add, add);
     });
 
-    async function masterSearch(query) {
-        if (!masterSpaceCode) return;
+    // --- Master Search ---
+    let masterSearchTimer, masterSearchSeq = 0;
+    const masterSearchInput = $('masterSearchInput');
+    const masterSearchResults = $('masterSearchResults');
+
+    masterSearchInput.addEventListener('input', () => {
+        const q = masterSearchInput.value.trim();
+        $('masterClearSearch').classList.toggle('hidden', !q);
+        clearTimeout(masterSearchTimer);
+        if (q.length < 2) { masterSearchResults.classList.add('hidden'); return; }
+        masterSearchTimer = setTimeout(() => masterSearch(q), 300);
+    });
+
+    async function masterSearch(q) {
+        if (!masterCode) return;
+        const seq = ++masterSearchSeq;
         try {
-            const res = await fetch(`/api/spaces/${masterSpaceCode}/search?q=${encodeURIComponent(query)}`);
-            const tracks = await res.json();
-            if (tracks.length === 0) {
-                masterSearchResults.innerHTML = '<p class="text-sp-light text-sm text-center py-4">No results found</p>';
-                masterSearchResults.classList.remove('hidden');
-                return;
-            }
-            masterSearchResults.innerHTML = tracks.map(t => `
-                <div class="flex items-center gap-3 p-2.5 rounded-lg hover:bg-sp-card/80 transition-colors">
-                    <img src="${escHtml(t.album_art)}" alt="" class="w-10 h-10 rounded object-cover flex-shrink-0 shadow">
-                    <div class="flex-1 min-w-0">
-                        <p class="text-sm font-medium truncate">${escHtml(t.name)}</p>
-                        <p class="text-xs text-sp-light truncate">${escHtml(t.artist)}</p>
-                    </div>
-                    <button onclick="masterAddTrack(${escAttr(JSON.stringify(t))}, this)" class="w-8 h-8 rounded-full bg-sp-green text-sp-black flex items-center justify-center flex-shrink-0 hover:scale-110 active:scale-95 transition-transform">
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 4v16m8-8H4"/>
-                        </svg>
-                    </button>
-                </div>
-            `).join('');
+            const res = await fetch(`${spaceApi()}/search?q=${encodeURIComponent(q)}`);
+            const tracks = res.ok ? await res.json() : [];
+            if (seq !== masterSearchSeq) return;
+            tracks.forEach(t => masterKnown.set(t.track_id, t));
+            masterSearchResults.innerHTML = tracks.length
+                ? tracks.map(t => trackRow(t)).join('')
+                : '<p class="text-sp-light text-sm text-center py-4">No results found</p>';
             masterSearchResults.classList.remove('hidden');
         } catch (err) {
             console.error('Search error:', err);
@@ -771,86 +625,7 @@
     function masterClearSearch() {
         masterSearchInput.value = '';
         masterSearchResults.classList.add('hidden');
-        masterClearBtn.classList.add('hidden');
-    }
-
-    async function masterAddTrack(track, btn) {
-        if (!masterSpaceCode) return;
-        btn.disabled = true;
-        btn.innerHTML = '<svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>';
-        try {
-            const res = await fetch(`/api/spaces/${masterSpaceCode}/add`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(track),
-            });
-            if (res.ok) {
-                btn.innerHTML = '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>';
-                btn.classList.remove('bg-sp-green', 'text-sp-black');
-                btn.classList.add('bg-sp-green/20', 'text-sp-green');
-                loadMasterData();
-            } else if (res.status === 409) {
-                btn.innerHTML = '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>';
-                btn.classList.remove('bg-sp-green', 'text-sp-black');
-                btn.classList.add('bg-sp-card', 'text-sp-light');
-            } else {
-                btn.innerHTML = '!';
-            }
-        } catch (err) {
-            btn.innerHTML = '!';
-        }
-    }
-
-    function escAttr(str) {
-        return str.replace(/'/g, '&#39;').replace(/"/g, '&quot;');
-    }
-
-    // --- Master Recommendations ---
-    let masterLastRecsTrack = null;
-
-    async function loadMasterRecs(force = false) {
-        if (!masterSpaceCode) return;
-        const nowId = masterTrackId;
-        if (!force && nowId && nowId === masterLastRecsTrack) return;
-        masterLastRecsTrack = nowId;
-
-        try {
-            const res = await fetch(`/api/spaces/${masterSpaceCode}/recommendations`);
-            if (!res.ok) return;
-            const tracks = await res.json();
-            const section = document.getElementById('masterRecsSection');
-            const list = document.getElementById('masterRecsList');
-
-            if (tracks && tracks.length > 0) {
-                section.classList.remove('hidden');
-                list.innerHTML = tracks.slice(0, 5).map(t => `
-                    <div class="flex items-center gap-3 p-2.5 rounded-lg hover:bg-sp-card/80 transition-colors">
-                        <img src="${escHtml(t.album_art)}" alt="" class="w-10 h-10 rounded object-cover flex-shrink-0">
-                        <div class="flex-1 min-w-0">
-                            <p class="text-sm font-medium truncate">${escHtml(t.name)}</p>
-                            <p class="text-xs text-sp-light truncate">${escHtml(t.artist)}</p>
-                        </div>
-                        <button onclick="masterAddTrack(${escAttr(JSON.stringify(t))}, this)" class="w-8 h-8 rounded-full bg-sp-green text-sp-black flex items-center justify-center flex-shrink-0 hover:scale-110 active:scale-95 transition-transform shadow-sm">
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 4v16m8-8H4"/>
-                            </svg>
-                        </button>
-                    </div>
-                `).join('');
-            } else {
-                section.classList.add('hidden');
-            }
-        } catch (err) {
-            // Silent
-        }
-    }
-
-    function formatTime(ms) {
-        if (!ms) return '0:00';
-        const s = Math.floor(ms / 1000);
-        const m = Math.floor(s / 60);
-        const sec = s % 60;
-        return `${m}:${sec.toString().padStart(2, '0')}`;
+        $('masterClearSearch').classList.add('hidden');
     }
 
     init();

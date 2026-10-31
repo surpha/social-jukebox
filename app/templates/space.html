@@ -5,68 +5,26 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>{{ space_name }} — Social Jukebox</title>
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='50' fill='%231DB954'/%3E%3Cpath d='M70 47.5c-8-4.8-20-5.2-27.2-2.9-1.2.4-2.4-.3-2.7-1.4-.4-1.2.3-2.4 1.4-2.7 8.3-2.6 22-2.1 30.7 3.3 1 .6 1.4 2 .7 3.1-.6 1-2 1.3-3 .7zm-.7 8.5c-.5.8-1.6 1.1-2.4.6-6.6-4.1-16.7-5.3-24.6-2.9-1 .3-2-.2-2.3-1.2-.3-1 .2-2 1.2-2.3 9-2.7 20.2-1.4 27.9 3.3.8.5 1.1 1.6.6 2.5zm-2.7 8.2c-.4.7-1.3.9-2 .5-5.8-3.5-13-4.3-21.6-2.4-.8.2-1.6-.3-1.8-1.1-.2-.8.3-1.6 1.1-1.8 9.4-2.1 17.4-1.2 24 2.7.7.4.9 1.3.5 2z' fill='white'/%3E%3C/svg%3E">
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
-    <script>
-        tailwind.config = {
-            theme: {
-                extend: {
-                    colors: {
-                        'sp-green': '#1DB954',
-                        'sp-green-hover': '#1ed760',
-                        'sp-black': '#121212',
-                        'sp-dark': '#181818',
-                        'sp-card': '#282828',
-                        'sp-hover': '#333333',
-                        'sp-light': '#b3b3b3',
-                        'sp-white': '#ffffff',
-                    },
-                    fontFamily: { 'sans': ['Inter', 'system-ui', 'sans-serif'] }
-                }
-            }
-        }
-    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/app.css">
     <style>
         body { background-color: #121212; -webkit-tap-highlight-color: transparent; }
-        
-        /* Progress bar animation */
         .progress-bar { transition: width 1s linear; }
-        
-        /* Smooth vote animation */
-        @keyframes vote-pop {
-            0% { transform: scale(1); }
-            50% { transform: scale(1.2); }
-            100% { transform: scale(1); }
-        }
-        .vote-pop { animation: vote-pop 0.3s ease; }
-        
-        /* Slide up animation */
         @keyframes slide-up {
             from { opacity: 0; transform: translateY(20px); }
             to { opacity: 1; transform: translateY(0); }
         }
-        .slide-up { animation: slide-up 0.3s ease-out; }
-        
-        /* Search results fade */
-        @keyframes fade-in {
-            from { opacity: 0; }
-            to { opacity: 1; }
-        }
+        @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
         .fade-in { animation: fade-in 0.2s ease; }
-        
-        /* Hide scrollbar but allow scroll */
         .no-scrollbar::-webkit-scrollbar { display: none; }
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
-        
-        /* Equalizer animation for now playing */
-        @keyframes eq-bar {
-            0%, 100% { height: 4px; }
-            50% { height: 16px; }
-        }
+        @keyframes eq-bar { 0%, 100% { height: 4px; } 50% { height: 16px; } }
         .eq-bar { animation: eq-bar 0.8s ease-in-out infinite; }
         .eq-bar:nth-child(2) { animation-delay: 0.2s; }
         .eq-bar:nth-child(3) { animation-delay: 0.4s; }
-        
+        .paused .eq-bar { animation-play-state: paused; }
         input:focus { outline: none; }
     </style>
 </head>
@@ -81,8 +39,8 @@
                 <span class="text-sm font-semibold text-sp-light">{{ space_name }}</span>
             </div>
             <div class="flex items-center gap-1.5">
-                <span class="w-2 h-2 bg-sp-green rounded-full animate-pulse"></span>
-                <span class="text-xs text-sp-green font-medium">Live</span>
+                <span id="liveDot" class="w-2 h-2 bg-sp-light/50 rounded-full"></span>
+                <span id="liveText" class="text-xs text-sp-light font-medium">Connecting…</span>
             </div>
         </div>
     </header>
@@ -91,18 +49,17 @@
         <!-- Now Playing -->
         <section id="nowPlaying" class="bg-gradient-to-b from-sp-card to-sp-dark rounded-2xl p-5 border border-white/5">
             <div class="flex items-center gap-2 mb-4">
-                <div class="flex items-end gap-0.5 h-4">
+                <div id="eq" class="flex items-end gap-0.5 h-4 paused">
                     <div class="w-1 bg-sp-green rounded-full eq-bar"></div>
                     <div class="w-1 bg-sp-green rounded-full eq-bar"></div>
                     <div class="w-1 bg-sp-green rounded-full eq-bar"></div>
                 </div>
                 <span class="text-xs font-semibold text-sp-green uppercase tracking-wider">Now Playing</span>
             </div>
-            <div id="nowPlayingContent" class="flex items-center gap-4">
-                <div id="npArt" class="w-16 h-16 rounded-lg bg-sp-card flex-shrink-0 overflow-hidden shadow-lg">
-                    <div class="w-full h-full bg-sp-card flex items-center justify-center">
-                        <svg class="w-8 h-8 text-sp-light/30" fill="currentColor" viewBox="0 0 24 24"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>
-                    </div>
+            <div class="flex items-center gap-4">
+                <div class="w-16 h-16 rounded-lg bg-sp-card flex-shrink-0 overflow-hidden shadow-lg flex items-center justify-center">
+                    <img id="npImg" alt="" class="w-full h-full object-cover hidden">
+                    <svg id="npPlaceholder" class="w-8 h-8 text-sp-light/30" fill="currentColor" viewBox="0 0 24 24"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>
                 </div>
                 <div class="flex-1 min-w-0">
                     <p id="npTitle" class="font-semibold text-sm truncate text-sp-light">Nothing playing</p>
@@ -120,6 +77,11 @@
             </div>
         </section>
 
+        <!-- Offline notice -->
+        <section id="offlineNotice" class="hidden text-center text-sm text-sp-light bg-sp-dark border border-white/5 rounded-xl p-4">
+            This space isn't live right now. You can still add songs — they'll play once the host goes live.
+        </section>
+
         <!-- Up Next (locked in) -->
         <section id="upNextSection" class="hidden">
             <div class="flex items-center gap-2 mb-3">
@@ -127,10 +89,10 @@
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
                 </svg>
                 <h2 class="text-base font-bold">Up Next</h2>
-                <span class="text-[10px] text-sp-light bg-sp-green/10 text-sp-green px-2 py-0.5 rounded-full font-semibold uppercase">Locked</span>
+                <span class="text-[10px] bg-sp-green/10 text-sp-green px-2 py-0.5 rounded-full font-semibold uppercase">Locked</span>
             </div>
-            <div id="upNextCard" class="flex items-center gap-3 p-3 rounded-xl bg-sp-green/5 border border-sp-green/20">
-                <img id="unArt" src="" alt="" class="w-12 h-12 rounded object-cover flex-shrink-0 shadow">
+            <div class="flex items-center gap-3 p-3 rounded-xl bg-sp-green/5 border border-sp-green/20">
+                <img id="unArt" alt="" class="w-12 h-12 rounded object-cover flex-shrink-0 shadow">
                 <div class="flex-1 min-w-0">
                     <p id="unTitle" class="text-sm font-semibold truncate"></p>
                     <p id="unArtist" class="text-xs text-sp-light truncate mt-0.5"></p>
@@ -150,17 +112,15 @@
                 <svg class="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-sp-light" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
                 </svg>
-                <input type="text" id="searchInput" placeholder="What do you want to listen to?"
+                <input type="text" id="searchInput" placeholder="What do you want to listen to?" autocomplete="off"
                     class="w-full pl-11 pr-4 py-3.5 bg-sp-card border border-white/5 rounded-full text-sm text-white placeholder-sp-light/70 focus:border-sp-green/50 transition-colors">
-                <button id="clearSearch" onclick="clearSearch()" class="absolute right-4 top-1/2 -translate-y-1/2 text-sp-light hover:text-white hidden">
+                <button id="clearSearch" class="absolute right-4 top-1/2 -translate-y-1/2 text-sp-light hover:text-white hidden" aria-label="Clear search">
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
                     </svg>
                 </button>
             </div>
-            <div id="searchResults" class="mt-3 space-y-1 hidden">
-                <!-- Populated by JS -->
-            </div>
+            <div id="searchResults" class="mt-3 space-y-1 hidden"></div>
         </section>
 
         <!-- Queue -->
@@ -169,9 +129,7 @@
                 <h2 class="text-base font-bold">Queue</h2>
                 <span id="queueCount" class="text-xs text-sp-light bg-sp-card px-2.5 py-1 rounded-full">0 songs</span>
             </div>
-            <div id="queueList" class="space-y-2">
-                <!-- Populated by JS -->
-            </div>
+            <div id="queueList" class="space-y-2"></div>
             <div id="queueEmpty" class="text-center py-12">
                 <div class="w-14 h-14 bg-sp-card rounded-full flex items-center justify-center mx-auto mb-3">
                     <svg class="w-7 h-7 text-sp-light/40" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -183,107 +141,236 @@
             </div>
         </section>
 
-        <!-- Spotify Queue (coming up on Spotify) -->
+        <!-- Spotify Queue -->
         <section id="spotifyQueueSection" class="hidden">
-            <div class="flex items-center justify-between mb-3">
-                <div class="flex items-center gap-2">
-                    <svg class="w-4 h-4 text-sp-green" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z"/></svg>
-                    <h2 class="text-base font-bold">Coming Up on Spotify</h2>
-                </div>
+            <div class="flex items-center gap-2 mb-3">
+                <svg class="w-4 h-4 text-sp-green" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z"/></svg>
+                <h2 class="text-base font-bold">Coming Up on Spotify</h2>
             </div>
             <p class="text-xs text-sp-light/60 -mt-1 mb-3">From Spotify's queue • tap + to request</p>
-            <div id="spotifyQueueList" class="space-y-1">
-            </div>
+            <div id="spotifyQueueList" class="space-y-1"></div>
         </section>
 
         <!-- Recommendations -->
         <section id="recsSection" class="hidden">
-            <div class="flex items-center justify-between mb-3">
-                <div class="flex items-center gap-2">
-                    <svg class="w-4 h-4 text-sp-green" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
-                    <h2 class="text-base font-bold">Suggested For You</h2>
-                </div>
-                <button onclick="loadRecommendations(true)" class="text-xs text-sp-green hover:text-sp-green-hover font-medium">Refresh</button>
+            <div class="flex items-center gap-2 mb-3">
+                <svg class="w-4 h-4 text-sp-green" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
+                <h2 class="text-base font-bold">Suggested For You</h2>
             </div>
             <p class="text-xs text-sp-light/60 -mt-1 mb-3">Based on what's playing • tap + to add</p>
-            <div id="recsList" class="space-y-1">
-            </div>
+            <div id="recsList" class="space-y-1"></div>
         </section>
     </main>
 
     <!-- Confirmation Modal -->
     <div id="confirmModal" class="fixed inset-0 z-[150] hidden items-end justify-center bg-black/60 backdrop-blur-sm">
         <div class="bg-sp-dark rounded-t-2xl p-5 w-full max-w-lg border-t border-white/10 shadow-2xl animate-[slide-up_0.2s_ease-out]">
-            <div id="confirmContent" class="flex items-center gap-3 mb-5">
-                <img id="confirmArt" src="" alt="" class="w-14 h-14 rounded-lg object-cover shadow">
+            <div class="flex items-center gap-3 mb-5">
+                <img id="confirmArt" alt="" class="w-14 h-14 rounded-lg object-cover shadow">
                 <div class="flex-1 min-w-0">
                     <p id="confirmTitle" class="font-semibold text-sm truncate"></p>
                     <p id="confirmArtist" class="text-xs text-sp-light truncate mt-0.5"></p>
                 </div>
             </div>
             <div class="flex gap-3">
-                <button onclick="closeConfirm()" class="flex-1 py-3 border border-white/10 rounded-full font-semibold text-sm hover:bg-sp-card transition-colors">Cancel</button>
+                <button id="confirmCancel" class="flex-1 py-3 border border-white/10 rounded-full font-semibold text-sm hover:bg-sp-card transition-colors">Cancel</button>
                 <button id="confirmBtn" class="flex-1 py-3 bg-sp-green text-sp-black font-bold text-sm rounded-full hover:bg-sp-green-hover transition-colors">Add to Queue</button>
             </div>
         </div>
     </div>
 
-    <!-- Toast Notification -->
+    <!-- Toast -->
     <div id="toast" class="fixed bottom-6 left-1/2 -translate-x-1/2 z-[200] hidden">
         <div class="bg-sp-green text-sp-black px-5 py-2.5 rounded-full font-semibold text-sm shadow-lg shadow-sp-green/20 flex items-center gap-2">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
             </svg>
-            <span id="toastText">Added to queue!</span>
+            <span id="toastText"></span>
         </div>
     </div>
 
+    <script src="/static/live.js"></script>
     <script>
-    const SPACE_CODE = '{{ space_code }}';
-    const API = `/api/spaces/${SPACE_CODE}`;
-    let refreshInterval;
-    let searchTimeout;
+    const SPACE_CODE = {{ space_code|tojson }};
+    const API = `/api/spaces/${encodeURIComponent(SPACE_CODE)}`;
+    const $ = (id) => document.getElementById(id);
+    const { esc, formatTime, toast, trackRow, renderTrackList, QueueView, NowPlaying } = Live;
 
-    // --- Search ---
-    const searchInput = document.getElementById('searchInput');
-    const searchResults = document.getElementById('searchResults');
-    const clearBtn = document.getElementById('clearSearch');
+    const known = new Map();  // track_id -> metadata shown on screen
+    let state = null;
+    let myVotes = {};
 
-    searchInput.addEventListener('input', (e) => {
-        const q = e.target.value.trim();
-        clearBtn.classList.toggle('hidden', !q);
-        
-        clearTimeout(searchTimeout);
-        if (q.length < 2) { searchResults.classList.add('hidden'); return; }
-        
-        searchTimeout = setTimeout(() => searchTracks(q), 300);
+    const nowPlaying = new NowPlaying({
+        img: $('npImg'), placeholder: $('npPlaceholder'), title: $('npTitle'), artist: $('npArtist'),
+        bar: $('npProgress'), elapsed: $('npElapsed'), duration: $('npDuration'), eq: $('eq'),
     });
 
-    async function searchTracks(query) {
-        try {
-            const res = await fetch(`${API}/search?q=${encodeURIComponent(query)}`);
-            const tracks = await res.json();
-            
-            if (tracks.length === 0) {
-                searchResults.innerHTML = '<p class="text-sp-light text-sm text-center py-4">No results found</p>';
-                searchResults.classList.remove('hidden');
-                return;
-            }
+    const queueView = new QueueView($('queueList'), {
+        myVote: (id) => myVotes[id] || null,
+        onVote: castVote,
+        showDownvote: true,
+    });
 
-            searchResults.innerHTML = tracks.map(t => `
-                <div class="flex items-center gap-3 p-2.5 rounded-lg hover:bg-sp-card/80 transition-colors group fade-in cursor-pointer" onclick="addTrack(${escAttr(JSON.stringify(t))})">
-                    <img src="${escHtml(t.album_art)}" alt="" class="w-11 h-11 rounded object-cover flex-shrink-0 shadow">
-                    <div class="flex-1 min-w-0">
-                        <p class="text-sm font-medium truncate">${escHtml(t.name)}</p>
-                        <p class="text-xs text-sp-light truncate">${escHtml(t.artist)}</p>
-                    </div>
-                    <button class="w-8 h-8 rounded-full bg-sp-green text-sp-black flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 hover:scale-110">
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 4v16m8-8H4"/>
-                        </svg>
-                    </button>
-                </div>
-            `).join('');
+    // --- Live state (SSE) ---
+    function applyState(data) {
+        if (data.deleted) {
+            $('liveText').textContent = 'Ended';
+            return;
+        }
+        state = data;
+        $('offlineNotice').classList.toggle('hidden', data.active);
+        $('liveDot').className = `w-2 h-2 rounded-full ${data.active ? 'bg-sp-green animate-pulse' : 'bg-sp-light/50'}`;
+        $('liveText').className = `text-xs font-medium ${data.active ? 'text-sp-green' : 'text-sp-light'}`;
+        $('liveText').textContent = data.active ? 'Live' : 'Offline';
+
+        nowPlaying.update(data.now_playing);
+
+        const un = data.up_next;
+        $('upNextSection').classList.toggle('hidden', !un);
+        if (un) {
+            if ($('unArt').getAttribute('src') !== un.album_art) $('unArt').src = un.album_art;
+            $('unTitle').textContent = un.name;
+            $('unArtist').textContent = un.artist;
+            $('unVotes').textContent = un.vote_count;
+        }
+
+        renderQueue();
+        renderTrackList($('spotifyQueueSection'), $('spotifyQueueList'), data.spotify_queue, known);
+        const taken = new Set(data.queue.map(i => i.track_id));
+        if (un) taken.add(un.track_id);
+        if (data.now_playing) taken.add(data.now_playing.track_id);
+        renderTrackList($('recsSection'), $('recsList'), data.recommendations.filter(t => !taken.has(t.track_id)).slice(0, 5), known);
+    }
+
+    function renderQueue() {
+        queueView.render(state.queue);
+        $('queueEmpty').classList.toggle('hidden', state.queue.length > 0);
+        $('queueCount').textContent = `${state.queue.length} song${state.queue.length === 1 ? '' : 's'}`;
+    }
+
+    Live.connect(`${API}/events`, applyState, (ok) => {
+        if (!ok) { $('liveText').textContent = 'Reconnecting…'; $('liveDot').className = 'w-2 h-2 rounded-full bg-yellow-400'; }
+    });
+    fetch(`${API}/my-votes`).then(r => r.ok ? r.json() : {}).then(v => { myVotes = v; if (state) renderQueue(); }).catch(() => {});
+
+    // --- Voting (optimistic) ---
+    const voteValue = (v) => v === 'up' ? 1 : v === 'down' ? -1 : 0;
+    const inflight = new Set();
+
+    async function castVote(trackId, direction) {
+        if (inflight.has(trackId) || !state) return;
+        const item = state.queue.find(i => i.track_id === trackId);
+        if (!item) return;
+        const prev = myVotes[trackId] || null;
+        const next = prev === direction ? null : direction;
+        const apply = (vote, count) => {
+            if (vote) myVotes[trackId] = vote; else delete myVotes[trackId];
+            item.vote_count = count;
+            state.queue.sort((a, b) => b.vote_count - a.vote_count);  // stable: ties keep server (age) order
+            renderQueue();
+        };
+        const prevCount = item.vote_count;
+        apply(next, prevCount + voteValue(next) - voteValue(prev));
+        inflight.add(trackId);
+        try {
+            const res = await fetch(`${API}/${direction === 'up' ? 'vote' : 'downvote'}`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ track_id: trackId }),
+            });
+            if (!res.ok) throw new Error(res.status);
+            const data = await res.json();
+            apply(data.my_vote, data.vote_count);
+        } catch (err) {
+            apply(prev, prevCount);
+            toast('Vote failed — try again');
+        } finally {
+            inflight.delete(trackId);
+        }
+    }
+
+    // --- Adding ---
+    async function addTrack(trackId, btn) {
+        const track = known.get(trackId);
+        if (!track) return;
+        if (btn) { btn.disabled = true; btn.classList.add('opacity-50'); }
+        try {
+            const res = await fetch(`${API}/add`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ track_id: trackId }),
+            });
+            if (res.ok) {
+                myVotes[trackId] = 'up';
+                if (state && !state.queue.some(i => i.track_id === trackId)) {
+                    state.queue.push({ ...track, id: trackId, vote_count: 1 });
+                    renderQueue();
+                }
+                toast('Added to queue!');
+                clearSearch();
+            } else if (res.status === 409) {
+                toast('Already in queue');
+            } else {
+                const data = await res.json().catch(() => ({}));
+                toast(data.detail || 'Failed to add');
+            }
+        } catch (err) {
+            toast('Network error');
+        } finally {
+            if (btn) { btn.disabled = false; btn.classList.remove('opacity-50'); }
+        }
+    }
+
+    document.addEventListener('click', (e) => {
+        const add = e.target.closest('[data-add]');
+        if (add) { addTrack(add.dataset.add, add); return; }
+        const confirmEl = e.target.closest('[data-confirm]');
+        if (confirmEl) showConfirm(confirmEl.dataset.confirm);
+    });
+
+    // --- Confirm modal ---
+    let pendingTrackId = null;
+    function showConfirm(trackId) {
+        const t = known.get(trackId);
+        if (!t) return;
+        pendingTrackId = trackId;
+        $('confirmArt').src = t.album_art;
+        $('confirmTitle').textContent = t.name;
+        $('confirmArtist').textContent = t.artist;
+        $('confirmModal').classList.replace('hidden', 'flex');
+    }
+    function closeConfirm() {
+        $('confirmModal').classList.replace('flex', 'hidden');
+        pendingTrackId = null;
+    }
+    $('confirmCancel').addEventListener('click', closeConfirm);
+    $('confirmBtn').addEventListener('click', () => {
+        const id = pendingTrackId;
+        closeConfirm();
+        if (id) addTrack(id);
+    });
+
+    // --- Search ---
+    const searchInput = $('searchInput');
+    const searchResults = $('searchResults');
+    let searchTimer, searchSeq = 0;
+
+    searchInput.addEventListener('input', () => {
+        const q = searchInput.value.trim();
+        $('clearSearch').classList.toggle('hidden', !q);
+        clearTimeout(searchTimer);
+        if (q.length < 2) { searchResults.classList.add('hidden'); return; }
+        searchTimer = setTimeout(() => searchTracks(q), 300);
+    });
+
+    async function searchTracks(q) {
+        const seq = ++searchSeq;
+        try {
+            const res = await fetch(`${API}/search?q=${encodeURIComponent(q)}`);
+            const tracks = res.ok ? await res.json() : [];
+            if (seq !== searchSeq) return;  // a newer search superseded this one
+            tracks.forEach(t => known.set(t.track_id, t));
+            searchResults.innerHTML = tracks.length
+                ? tracks.map(t => trackRow(t, { confirm: true })).join('')
+                : '<p class="text-sp-light text-sm text-center py-4">No results found</p>';
             searchResults.classList.remove('hidden');
         } catch (err) {
             console.error('Search error:', err);
@@ -293,450 +380,9 @@
     function clearSearch() {
         searchInput.value = '';
         searchResults.classList.add('hidden');
-        clearBtn.classList.add('hidden');
+        $('clearSearch').classList.add('hidden');
     }
-
-    // --- Confirmation Modal ---
-    let pendingAction = null;
-
-    function showConfirm(track, action) {
-        pendingAction = { track, action };
-        document.getElementById('confirmArt').src = track.album_art;
-        document.getElementById('confirmTitle').textContent = track.name;
-        document.getElementById('confirmArtist').textContent = track.artist;
-        document.getElementById('confirmBtn').textContent = action === 'add' ? 'Add to Queue' : '▲ Upvote';
-        const modal = document.getElementById('confirmModal');
-        modal.classList.remove('hidden');
-        modal.classList.add('flex');
-    }
-
-    function closeConfirm() {
-        const modal = document.getElementById('confirmModal');
-        modal.classList.add('hidden');
-        modal.classList.remove('flex');
-        pendingAction = null;
-    }
-
-    document.getElementById('confirmBtn').addEventListener('click', async () => {
-        if (!pendingAction) return;
-        const { track, action } = pendingAction;
-        closeConfirm();
-        if (action === 'add') await doAddTrack(track);
-        else if (action === 'vote') await doVote(track.track_id);
-    });
-
-    // --- Add Track ---
-    function addTrack(track) {
-        showConfirm(track, 'add');
-    }
-
-    async function doAddTrack(track) {
-        try {
-            const res = await fetch(`${API}/add`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(track),
-            });
-
-            if (res.ok) {
-                showToast('Added to queue!');
-                clearSearch();
-                // Force refresh fingerprint so next poll picks up the new item
-                lastQueueFingerprint = '';
-                loadQueue();
-            } else if (res.status === 409) {
-                showToast('Already in queue');
-            } else {
-                const data = await res.json();
-                showToast(data.detail || 'Failed to add');
-            }
-        } catch (err) {
-            showToast('Network error');
-        }
-    }
-
-    // --- Vote (toggle) ---
-    function vote(trackId, btn) {
-        doVote(trackId);
-    }
-
-    async function doVote(trackId) {
-        // Optimistic UI: toggle button state immediately
-        const queueList = document.getElementById('queueList');
-        const btn = queueList.querySelector(`button[onclick*="vote('${trackId}'"]`);
-        const downBtn = queueList.querySelector(`button[onclick*="downvote('${trackId}'"]`);
-        const isVoted = btn && btn.dataset.voted === 'true';
-
-        if (btn) {
-            if (isVoted) {
-                btn.dataset.voted = 'false';
-                btn.classList.remove('bg-sp-green/20', 'border-sp-green/50', 'text-sp-green');
-                btn.classList.add('border-white/10', 'text-sp-light', 'hover:border-sp-green/50', 'hover:text-sp-green', 'hover:bg-sp-green/10');
-            } else {
-                btn.dataset.voted = 'true';
-                btn.classList.remove('border-white/10', 'text-sp-light', 'hover:border-sp-green/50', 'hover:text-sp-green', 'hover:bg-sp-green/10');
-                btn.classList.add('bg-sp-green/20', 'border-sp-green/50', 'text-sp-green');
-                // Clear downvote if active
-                if (downBtn && downBtn.dataset.downvoted === 'true') {
-                    downBtn.dataset.downvoted = 'false';
-                    downBtn.classList.remove('bg-red-500/20', 'border-red-500/50', 'text-red-400');
-                    downBtn.classList.add('border-white/10', 'text-sp-light', 'hover:border-red-500/50', 'hover:text-red-400', 'hover:bg-red-500/10');
-                }
-            }
-        }
-
-        try {
-            const res = await fetch(`${API}/vote`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ track_id: trackId }),
-            });
-
-            if (res.ok) {
-                const data = await res.json();
-                showToast(data.status === 'unvoted' ? 'Vote removed' : 'Vote counted!');
-                lastQueueFingerprint = '';
-                loadQueue();
-            } else {
-                loadQueue();
-            }
-        } catch (err) {
-            console.error('Vote error:', err);
-            loadQueue();
-        }
-    }
-
-    // --- Downvote (toggle) ---
-    function downvote(trackId, btn) {
-        doDownvote(trackId);
-    }
-
-    async function doDownvote(trackId) {
-        // Optimistic UI
-        const queueList = document.getElementById('queueList');
-        const btn = queueList.querySelector(`button[onclick*="downvote('${trackId}'"]`);
-        const upBtn = queueList.querySelector(`button[onclick*="vote('${trackId}'"]`);
-        const isDownvoted = btn && btn.dataset.downvoted === 'true';
-
-        if (btn) {
-            if (isDownvoted) {
-                btn.dataset.downvoted = 'false';
-                btn.classList.remove('bg-red-500/20', 'border-red-500/50', 'text-red-400');
-                btn.classList.add('border-white/10', 'text-sp-light', 'hover:border-red-500/50', 'hover:text-red-400', 'hover:bg-red-500/10');
-            } else {
-                btn.dataset.downvoted = 'true';
-                btn.classList.remove('border-white/10', 'text-sp-light', 'hover:border-red-500/50', 'hover:text-red-400', 'hover:bg-red-500/10');
-                btn.classList.add('bg-red-500/20', 'border-red-500/50', 'text-red-400');
-                // Clear upvote if active
-                if (upBtn && upBtn.dataset.voted === 'true') {
-                    upBtn.dataset.voted = 'false';
-                    upBtn.classList.remove('bg-sp-green/20', 'border-sp-green/50', 'text-sp-green');
-                    upBtn.classList.add('border-white/10', 'text-sp-light', 'hover:border-sp-green/50', 'hover:text-sp-green', 'hover:bg-sp-green/10');
-                }
-            }
-        }
-
-        try {
-            const res = await fetch(`${API}/downvote`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ track_id: trackId }),
-            });
-
-            if (res.ok) {
-                const data = await res.json();
-                showToast(data.status === 'undownvoted' ? 'Downvote removed' : 'Downvoted');
-                lastQueueFingerprint = '';
-                loadQueue();
-            } else {
-                loadQueue();
-            }
-        } catch (err) {
-            console.error('Downvote error:', err);
-            loadQueue();
-        }
-    }
-
-    let lastQueueData = null;
-    let progressInterval = null;
-    let currentProgress = 0;
-    let currentDuration = 0;
-    let isPlaying = false;
-    let currentTrackId = null;
-    let lastQueueFingerprint = '';
-    let lastUpNextId = null;
-    let lastSpotifyQueueFingerprint = '';
-
-    // Smooth progress bar: interpolate between API polls
-    function startProgressTicker() {
-        if (progressInterval) clearInterval(progressInterval);
-        progressInterval = setInterval(() => {
-            if (!isPlaying || currentDuration <= 0) return;
-            currentProgress = Math.min(currentProgress + 1000, currentDuration);
-            const pct = (currentProgress / currentDuration) * 100;
-            document.getElementById('npProgress').style.width = `${pct}%`;
-            document.getElementById('npElapsed').textContent = formatTime(currentProgress);
-        }, 1000);
-    }
-
-    // --- Load Queue (diff-based updates) ---
-    async function loadQueue() {
-        try {
-            const res = await fetch(`${API}/queue`);
-            const data = await res.json();
-            lastQueueData = data;
-
-            // Update Now Playing (only if track changed)
-            if (data.now_playing && data.now_playing.is_playing) {
-                const np = data.now_playing;
-                const trackChanged = (currentTrackId !== np.name + np.artist);
-                
-                if (trackChanged) {
-                    currentTrackId = np.name + np.artist;
-                    const artEl = document.getElementById('npArt');
-                    if (np.album_art) {
-                        const existingImg = artEl.querySelector('img');
-                        if (!existingImg || existingImg.src !== np.album_art) {
-                            artEl.innerHTML = `<img src="${escHtml(np.album_art)}" alt="" class="w-full h-full object-cover">`;
-                        }
-                    } else {
-                        artEl.innerHTML = `<div class="w-full h-full bg-sp-card flex items-center justify-center"><svg class="w-8 h-8 text-sp-light/30" fill="currentColor" viewBox="0 0 24 24"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg></div>`;
-                    }
-                    document.getElementById('npTitle').textContent = np.name;
-                    document.getElementById('npTitle').classList.remove('text-sp-light');
-                    document.getElementById('npTitle').classList.add('text-white');
-                    document.getElementById('npArtist').textContent = np.artist;
-                    document.getElementById('npDuration').textContent = formatTime(np.duration_ms);
-                }
-                
-                // Sync progress only if drift > 3s or track changed
-                const drift = Math.abs(np.progress_ms - currentProgress);
-                if (trackChanged || drift > 3000) {
-                    currentProgress = np.progress_ms;
-                }
-                currentDuration = np.duration_ms;
-                isPlaying = true;
-                const progress = currentDuration > 0 ? (currentProgress / currentDuration) * 100 : 0;
-                document.getElementById('npProgress').style.width = `${progress}%`;
-                document.getElementById('npElapsed').textContent = formatTime(currentProgress);
-            } else {
-                isPlaying = false;
-            }
-
-            // Update Up Next (only if changed)
-            const upNextSection = document.getElementById('upNextSection');
-            if (data.up_next) {
-                const newUpNextId = data.up_next.track_id + data.up_next.vote_count;
-                if (lastUpNextId !== newUpNextId) {
-                    lastUpNextId = newUpNextId;
-                    upNextSection.classList.remove('hidden');
-                    const unArt = document.getElementById('unArt');
-                    if (unArt.src !== data.up_next.album_art) unArt.src = data.up_next.album_art;
-                    document.getElementById('unTitle').textContent = data.up_next.name;
-                    document.getElementById('unArtist').textContent = data.up_next.artist;
-                    document.getElementById('unVotes').textContent = data.up_next.vote_count;
-                }
-            } else {
-                lastUpNextId = null;
-                upNextSection.classList.add('hidden');
-            }
-
-            // Update Queue (only rebuild if data changed)
-            const queueList = document.getElementById('queueList');
-            const queueEmpty = document.getElementById('queueEmpty');
-            const queueCount = document.getElementById('queueCount');
-            const newFingerprint = data.queue.map(i => `${i.track_id}:${i.vote_count}:${i.has_voted}:${i.has_downvoted}`).join('|');
-
-            if (data.queue.length === 0) {
-                if (lastQueueFingerprint !== '') {
-                    queueList.innerHTML = '';
-                    lastQueueFingerprint = '';
-                }
-                queueEmpty.classList.remove('hidden');
-                queueCount.textContent = '0 songs';
-            } else {
-                queueEmpty.classList.add('hidden');
-                queueCount.textContent = `${data.queue.length} song${data.queue.length > 1 ? 's' : ''}`;
-                
-                if (newFingerprint !== lastQueueFingerprint) {
-                    lastQueueFingerprint = newFingerprint;
-                    queueList.innerHTML = data.queue.map((item, i) => `
-                        <div class="flex items-center gap-3 p-3 rounded-xl bg-sp-dark border border-white/5 hover:border-white/10 transition-all">
-                            <span class="text-xs text-sp-light/50 font-bold w-5 text-center flex-shrink-0">${i + 1}</span>
-                            <img src="${escHtml(item.album_art)}" alt="" class="w-11 h-11 rounded object-cover flex-shrink-0 shadow">
-                            <div class="flex-1 min-w-0">
-                                <p class="text-sm font-medium truncate">${escHtml(item.name)}</p>
-                                <p class="text-xs text-sp-light truncate">${escHtml(item.artist)}</p>
-                            </div>
-                            <div class="flex items-center gap-1 flex-shrink-0">
-                                <button onclick="vote('${item.track_id}', this)" data-track="${item.track_id}" data-voted="${item.has_voted}"
-                                    class="flex items-center gap-1 px-2.5 py-1.5 rounded-full border text-sm font-semibold transition-all ${item.has_voted ? 'bg-sp-green/20 border-sp-green/50 text-sp-green' : 'border-white/10 text-sp-light hover:border-sp-green/50 hover:text-sp-green hover:bg-sp-green/10'}">
-                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 15l7-7 7 7"/>
-                                    </svg>
-                                </button>
-                                <span class="vote-count text-sm font-semibold text-sp-light min-w-[20px] text-center">${item.vote_count}</span>
-                                <button onclick="downvote('${item.track_id}', this)" data-track="${item.track_id}" data-downvoted="${item.has_downvoted}"
-                                    class="flex items-center gap-1 px-2.5 py-1.5 rounded-full border text-sm font-semibold transition-all ${item.has_downvoted ? 'bg-red-500/20 border-red-500/50 text-red-400' : 'border-white/10 text-sp-light hover:border-red-500/50 hover:text-red-400 hover:bg-red-500/10'}">
-                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 9l-7 7-7-7"/>
-                                    </svg>
-                                </button>
-                            </div>
-                        </div>
-                    `).join('');
-                }
-            }
-
-            // Update Spotify Queue section (only if changed — server already filters queued tracks)
-            const spotifyQueueSection = document.getElementById('spotifyQueueSection');
-            const spotifyQueueList = document.getElementById('spotifyQueueList');
-            const spotifyTracks = data.spotify_queue || [];
-            const sqFingerprint = spotifyTracks.map(t => t.track_id).join('|');
-            if (sqFingerprint !== lastSpotifyQueueFingerprint) {
-                lastSpotifyQueueFingerprint = sqFingerprint;
-                if (spotifyTracks.length > 0) {
-                    spotifyQueueSection.classList.remove('hidden');
-                    spotifyQueueList.innerHTML = spotifyTracks.map(t => `
-                        <div class="flex items-center gap-3 p-2.5 rounded-lg hover:bg-sp-card/80 transition-colors">
-                            <img src="${escHtml(t.album_art)}" alt="" class="w-10 h-10 rounded object-cover flex-shrink-0">
-                            <div class="flex-1 min-w-0">
-                                <p class="text-sm font-medium truncate">${escHtml(t.name)}</p>
-                                <p class="text-xs text-sp-light truncate">${escHtml(t.artist)}</p>
-                            </div>
-                            <button onclick="quickAdd(${escAttr(JSON.stringify(t))}, this)" class="w-8 h-8 rounded-full bg-sp-green text-sp-black flex items-center justify-center flex-shrink-0 hover:scale-110 active:scale-95 transition-transform shadow-sm">
-                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 4v16m8-8H4"/>
-                                </svg>
-                            </button>
-                        </div>
-                    `).join('');
-                } else {
-                    spotifyQueueSection.classList.add('hidden');
-                }
-            }
-        } catch (err) {
-            console.error('Queue load error:', err);
-        }
-    }
-
-    // --- Utilities ---
-    function formatTime(ms) {
-        if (!ms) return '0:00';
-        const s = Math.floor(ms / 1000);
-        const m = Math.floor(s / 60);
-        const sec = s % 60;
-        return `${m}:${sec.toString().padStart(2, '0')}`;
-    }
-
-    function showToast(msg) {
-        const toast = document.getElementById('toast');
-        document.getElementById('toastText').textContent = msg;
-        toast.classList.remove('hidden');
-        setTimeout(() => toast.classList.add('hidden'), 2500);
-    }
-
-    function escHtml(str) {
-        if (!str) return '';
-        const div = document.createElement('div');
-        div.textContent = str;
-        return div.innerHTML;
-    }
-
-    function escAttr(str) {
-        return str.replace(/'/g, '&#39;').replace(/"/g, '&quot;');
-    }
-
-    // --- Load Recommendations ---
-    let lastRecsTrackId = null;
-
-    async function loadRecommendations(force = false) {
-        // Only reload recs if the currently playing track changed (or forced)
-        const nowId = currentTrackId;
-        if (!force && nowId && nowId === lastRecsTrackId) return;
-        lastRecsTrackId = nowId;
-
-        try {
-            const res = await fetch(`${API}/recommendations`);
-            const recsSection = document.getElementById('recsSection');
-            const recsList = document.getElementById('recsList');
-
-            if (!res.ok) {
-                // Show section anyway with a retry option
-                recsSection.classList.remove('hidden');
-                recsList.innerHTML = '<p class="text-sp-light/50 text-sm text-center py-4">Could not load suggestions. <button onclick="loadRecommendations(true)" class="text-sp-green underline">Try again</button></p>';
-                return;
-            }
-            const tracks = await res.json();
-
-            // Filter out tracks already in the queue
-            const qIds = new Set((lastQueueData?.queue || []).map(i => i.track_id));
-            if (lastQueueData?.up_next) qIds.add(lastQueueData.up_next.track_id);
-            const filtered = tracks.filter(t => !qIds.has(t.track_id));
-
-            if (filtered.length > 0) {
-                recsSection.classList.remove('hidden');
-                recsList.innerHTML = filtered.slice(0, 5).map(t => `
-                    <div class="flex items-center gap-3 p-2.5 rounded-lg hover:bg-sp-card/80 transition-colors fade-in">
-                        <img src="${escHtml(t.album_art)}" alt="" class="w-10 h-10 rounded object-cover flex-shrink-0">
-                        <div class="flex-1 min-w-0">
-                            <p class="text-sm font-medium truncate">${escHtml(t.name)}</p>
-                            <p class="text-xs text-sp-light truncate">${escHtml(t.artist)}</p>
-                        </div>
-                        <button onclick="quickAdd(${escAttr(JSON.stringify(t))}, this)" class="w-8 h-8 rounded-full bg-sp-green text-sp-black flex items-center justify-center flex-shrink-0 hover:scale-110 active:scale-95 transition-transform shadow-sm">
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 4v16m8-8H4"/>
-                            </svg>
-                        </button>
-                    </div>
-                `).join('');
-            } else {
-                recsSection.classList.add('hidden');
-            }
-        } catch (err) {
-            // Silent fail for recommendations
-        }
-    }
-
-    // Quick-add from recommendations (no confirm modal)
-    async function quickAdd(track, btn) {
-        btn.disabled = true;
-        btn.innerHTML = '<svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>';
-        try {
-            const res = await fetch(`${API}/add`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(track),
-            });
-            if (res.ok) {
-                btn.innerHTML = '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>';
-                btn.classList.remove('bg-sp-green', 'text-sp-black');
-                btn.classList.add('bg-sp-green/20', 'text-sp-green');
-                showToast('Added to queue!');
-                // Reset fingerprints so next loadQueue shows updated lists
-                lastQueueFingerprint = '';
-                lastSpotifyQueueFingerprint = '';
-                loadQueue();
-            } else if (res.status === 409) {
-                btn.innerHTML = '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>';
-                btn.classList.remove('bg-sp-green', 'text-sp-black');
-                btn.classList.add('bg-sp-card', 'text-sp-light');
-                showToast('Already in queue');
-            } else {
-                btn.innerHTML = '!';
-                showToast('Failed to add');
-            }
-        } catch (err) {
-            btn.innerHTML = '!';
-            showToast('Network error');
-        }
-    }
-
-    // --- Init ---
-    loadQueue();
-    startProgressTicker();
-    loadRecommendations();
-    refreshInterval = setInterval(() => { loadQueue(); loadRecommendations(); }, 3000);
+    $('clearSearch').addEventListener('click', clearSearch);
     </script>
 </body>
 </html>

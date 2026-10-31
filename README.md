@@ -12,9 +12,10 @@ Democratize the music in your space. Let guests vote on what plays next.
 
 - **Backend:** FastAPI (Python 3.11+)
 - **Database:** Supabase (PostgreSQL)
-- **Music:** Spotify Web API via `spotipy`
-- **Frontend:** Vanilla HTML/JS + Tailwind CSS (CDN)
-- **Deployment:** Render (free tier)
+- **Music:** Spotify Web API via async `httpx`
+- **Realtime:** Server-Sent Events — one engine per live space polls Spotify and pushes state to every guest
+- **Frontend:** Vanilla HTML/JS + prebuilt Tailwind CSS (`app/static/app.css`)
+- **Deployment:** Render (single process — engines live in memory)
 
 ## Local Development
 
@@ -68,6 +69,19 @@ uvicorn app.main:app --reload
 
 Visit: http://localhost:8000
 
+### Tests
+
+```bash
+pip install -r requirements-dev.txt
+pytest -q   # API tests run against a throwaway local Postgres (pgserver); never your .env DB
+```
+
+### Rebuild CSS after changing classes in templates or `app/static/*.js`
+
+```bash
+npx tailwindcss@3 -c tailwind.config.js -i tailwind.input.css -o app/static/app.css --minify
+```
+
 ## Deployment (Render)
 
 1. Push to GitHub
@@ -86,14 +100,16 @@ social-jukebox/
 │   ├── database.py          # Async SQLAlchemy engine
 │   ├── models.py            # ORM models (User, Space, QueueItem, Vote)
 │   ├── schemas.py           # Pydantic request/response schemas
-│   ├── auth.py              # JWT + password hashing
-│   ├── worker.py            # Background playback polling
+│   ├── auth.py              # JWT sessions + signed OAuth state
+│   ├── engine.py            # Per-space engine: polls Spotify, locks in top song, pushes SSE
+│   ├── spotify_client.py    # Async Spotify client, token refresh, rate-limit backoff
 │   ├── routers/
-│   │   ├── auth_routes.py   # Signup, login, Google OAuth
-│   │   ├── spotify.py       # Spotify OAuth linking
+│   │   ├── auth_routes.py   # Login with Spotify
+│   │   ├── spotify.py       # Spotify linking + playback controls
 │   │   ├── spaces.py        # Space CRUD + QR codes
-│   │   ├── queue.py         # Guest search, add, vote
+│   │   ├── queue.py         # Guest search, add, vote, SSE events
 │   │   └── pages.py         # HTML page serving
+│   ├── static/              # app.css (built), live.js (shared client)
 │   └── templates/
 │       ├── landing.html     # Public homepage
 │       ├── dashboard.html   # Owner dashboard
@@ -107,29 +123,31 @@ social-jukebox/
 ## API Endpoints
 
 ### Auth
-- `POST /api/auth/signup` — Create account
-- `POST /api/auth/login` — Login
-- `POST /api/auth/google` — Google OAuth
+- `GET /api/auth/spotify/login` — Get Spotify login URL
+- `GET /api/auth/spotify/callback` — Login callback (redirects to `/dashboard#token=…`)
 - `GET /api/auth/me` — Current user profile
 
 ### Spotify
 - `GET /api/spotify/link` — Get Spotify auth URL
 - `GET /api/spotify/callback` — Handle OAuth callback
 - `GET /api/spotify/status` — Check if Spotify is linked
+- `POST /api/spotify/playback/{play|pause|skip}` — Owner playback controls
 
 ### Spaces (requires auth)
 - `POST /api/spaces` — Create a space
 - `GET /api/spaces` — List your spaces
-- `PATCH /api/spaces/{code}/activate` — Start polling
-- `PATCH /api/spaces/{code}/deactivate` — Stop polling
+- `PATCH /api/spaces/{code}/activate` — Start the space engine
+- `PATCH /api/spaces/{code}/deactivate` — Stop the engine and clear the queue
 - `DELETE /api/spaces/{code}` — Delete space
 - `GET /api/spaces/{code}/qr` — Download QR code PNG
 
 ### Queue (no auth — for guests)
-- `GET /api/spaces/{code}/search?q=` — Search Spotify
-- `POST /api/spaces/{code}/add` — Add track to queue
-- `POST /api/spaces/{code}/vote` — Upvote a track
-- `GET /api/spaces/{code}/queue` — Get now playing + queue
+- `GET /api/spaces/{code}/events` — SSE stream of live state (pushed only on change)
+- `GET /api/spaces/{code}/search?q=` — Search Spotify (cached)
+- `POST /api/spaces/{code}/add` — Add track (metadata resolved server-side)
+- `POST /api/spaces/{code}/vote` / `downvote` — Toggle a vote
+- `GET /api/spaces/{code}/my-votes` — This guest's votes
+- `GET /api/spaces/{code}/queue` — One-shot snapshot
 
 ## License
 

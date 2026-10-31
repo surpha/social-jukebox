@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 # --- Auth Schemas ---
@@ -20,7 +20,7 @@ class UserResponse(BaseModel):
 # --- Space Schemas ---
 
 class CreateSpaceRequest(BaseModel):
-    name: str
+    name: str = Field(min_length=1, max_length=100)
 
 
 class SpaceResponse(BaseModel):
@@ -39,52 +39,15 @@ class SpaceResponse(BaseModel):
 
 class AddTrackRequest(BaseModel):
     track_id: str
-    name: str
-    artist: str
-    album_art: str
-    duration_ms: int
-
-
-class VoteRequest(BaseModel):
-    track_id: str
-
-
-class QueueItemResponse(BaseModel):
-    id: uuid.UUID
-    track_id: str
-    name: str
-    artist: str
-    album_art: str
-    duration_ms: int
-    vote_count: int
-    created_at: datetime
-    has_voted: bool = False
-    has_downvoted: bool = False
-
-    class Config:
-        from_attributes = True
-
-
-class NowPlayingResponse(BaseModel):
-    track_id: str | None = None
+    # Ignored: metadata is resolved server-side so guests can't spoof it.
     name: str | None = None
     artist: str | None = None
     album_art: str | None = None
     duration_ms: int | None = None
-    progress_ms: int | None = None
-    is_playing: bool = False
 
 
-class UpNextResponse(BaseModel):
+class VoteRequest(BaseModel):
     track_id: str
-    name: str
-    artist: str
-    album_art: str
-    duration_ms: int
-    vote_count: int
-
-    class Config:
-        from_attributes = True
 
 
 class SearchResult(BaseModel):
@@ -93,11 +56,3 @@ class SearchResult(BaseModel):
     artist: str
     album_art: str
     duration_ms: int
-
-
-class QueueResponse(BaseModel):
-    now_playing: NowPlayingResponse | None = None
-    up_next: UpNextResponse | None = None
-    queue: list[QueueItemResponse] = []
-    spotify_queue: list[SearchResult] = []
-    space_name: str = ""

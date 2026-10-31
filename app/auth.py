@@ -34,9 +34,27 @@ def create_access_token(user_id: UUID) -> str:
 def decode_access_token(token: str) -> str | None:
     try:
         payload = jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
+        if payload.get("purpose"):
+            return None
         return payload.get("sub")
     except JWTError:
         return None
+
+
+def create_oauth_state(purpose: str, sub: str) -> str:
+    """Short-lived signed OAuth `state` so callbacks can't be forged or replayed into another account."""
+    expire = datetime.now(timezone.utc) + timedelta(minutes=10)
+    return jwt.encode({"sub": sub, "purpose": purpose, "exp": expire}, settings.secret_key, algorithm=settings.algorithm)
+
+
+def verify_oauth_state(state: str, purpose: str) -> str | None:
+    try:
+        payload = jwt.decode(state, settings.secret_key, algorithms=[settings.algorithm])
+    except JWTError:
+        return None
+    if payload.get("purpose") != purpose:
+        return None
+    return payload.get("sub")
 
 
 async def get_current_user(
